@@ -1,0 +1,41 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: docker build -t agentle-test .
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: agentle-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy exact checked commit
+        env:
+          DEPLOY_KEY: ${{ secrets.AGENTLE_DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.AGENTLE_DEPLOY_HOST }}
+          KNOWN_HOSTS: ${{ secrets.AGENTLE_KNOWN_HOSTS }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes agentle-deploy@"$DEPLOY_HOST" "deploy $RELEASE_SHA"

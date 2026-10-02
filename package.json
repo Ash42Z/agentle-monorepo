@@ -1,0 +1,21 @@
+{
+  "name": "agentle",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "tsx --test test/*.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.8",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
