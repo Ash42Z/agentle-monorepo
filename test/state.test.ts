@@ -63,3 +63,21 @@ test("a waiting conversation blocks later requests on it, while other conversati
   assert.equal(s.next(10000)?.id, "a");
   s.db.close();
 });
+
+test("request source migration preserves old jobs and accepts previous-release inserts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentle-migration-"));
+  try {
+    let s = new State(join(dir, "db"));
+    s.enqueue("old", 1, "request");
+    s.saveConversation(1, "agentle/1", 10, "thread");
+    s.db.exec("ALTER TABLE jobs DROP COLUMN source");
+    s.db.close();
+    s = new State(join(dir, "db"));
+    assert.equal(s.next()?.source, null);
+    assert.equal(s.conversation(1)?.thread, "thread");
+    s.db.prepare("INSERT INTO jobs(id,number,prompt) VALUES(?,?,?)").run("previous-release", 2, "request");
+    s.enqueue("new", 1, "PR comment", 10);
+    assert.equal((s.db.prepare("SELECT source FROM jobs WHERE id='new'").get() as any).source, 10);
+    s.db.close();
+  } finally { rmSync(dir, { recursive: true }); }
+});

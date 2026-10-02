@@ -164,6 +164,9 @@ export class Workspaces {
     } catch {
       /* Leave merge conflicts for Codex to inspect and resolve. */
     }
+    await this.ownFiles(dir);
+  }
+  private async ownFiles(dir: string) {
     const own = async (path: string) => {
       for (const entry of await readdir(path, { withFileTypes: true })) {
         if (entry.name === ".git") continue;
@@ -173,6 +176,20 @@ export class Workspaces {
       }
     };
     await own(dir);
+  }
+  async continueFromBase(number: number, branch: string, base: string) {
+    const dir = this.path(number);
+    const args = ["git", "-c", `safe.directory=${dir}`];
+    if (await command([...args, "status", "--porcelain"], dir))
+      throw Error("Cannot start a followup branch with uncommitted work");
+    await command(["git", "check-ref-format", "refs/heads/" + branch], dir);
+    await this.authenticated([
+      "-c", `safe.directory=${dir}`, "fetch",
+      "https://github.com/" + this.gh.config.repository + ".git",
+      `refs/heads/${base}:refs/remotes/origin/${base}`,
+    ], dir);
+    await command([...args, "-c", "core.hooksPath=/dev/null", "checkout", "-B", branch, `origin/${base}`], dir);
+    await this.ownFiles(dir);
   }
   async changed(number: number, base: string) {
     const dir = this.path(number);
