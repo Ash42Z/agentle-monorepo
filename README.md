@@ -66,8 +66,12 @@ AGENTLE_IMAGE=agentle:local AGENTLE_WEB_IMAGE=agentle-web:local AGENTLE_RELEASE=
 
 ## Worker dashboard
 
-The home page shows the active request and PR, execution state, and pending requests in arrival order, including retry times and requests blocked by earlier work on the same conversation. Status refreshes every 30 seconds. Connect using the admin token over HTTPS; the page keeps it only in memory and clears it on disconnect or reload.
+The home page shows the active request and PR, execution state, and pending requests in arrival order, including retry times and requests blocked by earlier work on the same conversation. Status refreshes every 30 seconds. Sign in using the browser’s username/password prompt over HTTPS. The dashboard no longer accepts or stores controller or GitHub tokens.
 
 Use **Fetch conversation** beside a job, or enter an original request number (including a completed request), to fetch a point-in-time snapshot of its latest 30 user and assistant messages. Messages are capped at 20,000 characters each. Tool output is excluded. Fetching uses read-only Codex `thread/read`; it does not resume work. If Codex is disconnected or the thread cannot be read, the page reports that the conversation is unavailable and lets you retry.
 
-Caddy proxies only `/api/worker*` to the controller. `GET /api/worker` and `GET /api/worker/conversation/<original-request-number>` require the existing bearer admin token and return uncached responses. No controller credentials are embedded in the web image. Admin drain/resume and readiness endpoints remain outside the public proxy route.
+Caddy proxies `/api/worker*` to a dedicated dashboard backend. The backend authenticates the dashboard account, allows only the two read-only worker endpoints, and adds the controller bearer token on the internal request. Its port is not published. Responses are uncached; admin drain/resume and readiness endpoints are unavailable through this backend.
+
+Before deploying, create `/root/.config/agentle/dashboard-password` with a strong, separate password (root-owned, mode 600). The username defaults to `Ash42Z`; optionally set `AGENTLE_DASHBOARD_USER` in the deployment environment. Compose mounts this password and the existing `admin-token` file read-only into the backend. Never use the GitHub token or controller token as the dashboard password. Missing or empty secrets stop the backend, causing deployment readiness to fail and roll back. The web image contains no secrets.
+
+GitHub authentication remains entirely in the controller backend: its existing GitHub App private key is mounted from `/root/.config/agentle/github-app.pem`, and installation tokens are generated server-side. No GitHub personal access token is needed in the browser or Compose. The dashboard backend receives only the controller token and its own password, without the GitHub private key, Codex credentials, or workspaces.

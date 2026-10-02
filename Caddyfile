@@ -9,9 +9,9 @@ agentle.cc {
 	# handle_path /example/* {
 	#     reverse_proxy example:3000
 	# }
-	# Expose only read-only dashboard routes; the controller checks bearer auth.
+	# The dashboard backend authenticates users and holds controller credentials.
 	handle /api/worker* {
-		reverse_proxy bot:8080
+		reverse_proxy dashboard:8082
 	}
 	handle {
 		root * /srv
@@ -21,5 +21,5 @@ agentle.cc {
 
 # Container-local deployment probe; never published to the host.
 http://127.0.0.1:8081 {
-	respond /health "{$AGENTLE_RELEASE}" 200
+	reverse_proxy /health dashboard:8082
 }
