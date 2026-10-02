@@ -35,7 +35,7 @@ function fixture(mode: string) {
   script("git", `echo ${sha}`);
   script(
     "docker",
-    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\n`,
+    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\nif [[ "$*" == *"exec -T caddy"* ]]; then echo ${mode === "web-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"caddy validate"* && "${mode}" == "invalid-web" ]]; then exit 1;fi\n`,
   );
   script(
     "curl",
@@ -75,6 +75,9 @@ test("deployment builds before drain and activates healthy exact release", () =>
     assert.equal(r.status, 0, r.stderr);
     const log = readFileSync(join(f.root, "log"), "utf8");
     assert.ok(log.indexOf("docker build") < log.indexOf("/admin/drain"));
+    assert.ok(log.indexOf("caddy validate") < log.indexOf("/admin/drain"));
+    assert.ok(log.includes("exec -T caddy"));
+    assert.match(readFileSync(join(f.release, "release.env"), "utf8"), /AGENTLE_WEB_IMAGE=agentle-web:/);
     assert.equal(readlinkSync(join(f.host, "current")), f.release);
     assert.equal(readlinkSync(join(f.host, "previous")), f.old);
     assert.ok(log.includes("/admin/resume"));
@@ -102,6 +105,34 @@ test("failed readiness restores previous release and resumes processing", () => 
     assert.notEqual(r.status, 0);
     const log = readFileSync(join(f.root, "log"), "utf8");
     assert.equal(log.split("up -d").length - 1, 2);
+    assert.equal(readlinkSync(join(f.host, "current")), f.old);
+    assert.ok(log.includes("/admin/resume"));
+  } finally {
+    rmSync(f.root, { recursive: true });
+  }
+});
+
+test("invalid Caddy configuration aborts before draining", () => {
+  const f = fixture("invalid-web");
+  try {
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.ok(!log.includes("/admin/drain"));
+    assert.ok(!log.includes("up -d"));
+    assert.equal(readlinkSync(join(f.host, "current")), f.old);
+  } finally {
+    rmSync(f.root, { recursive: true });
+  }
+});
+test("failed web readiness rolls back and removes newly introduced services", () => {
+  const f = fixture("web-rollback");
+  try {
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.equal(log.split("up -d").length - 1, 2);
+    assert.ok(log.includes("--remove-orphans"));
     assert.equal(readlinkSync(join(f.host, "current")), f.old);
     assert.ok(log.includes("/admin/resume"));
   } finally {

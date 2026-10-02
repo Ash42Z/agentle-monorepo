@@ -1,0 +1,21 @@
+{
+	admin off
+}
+
+# Add future service routes inside this block, before the fallback handle.
+agentle.cc {
+	encode zstd gzip
+	# Example (add a matching Compose service first):
+	# handle_path /example/* {
+	#     reverse_proxy example:3000
+	# }
+	handle {
+		root * /srv
+		file_server
+	}
+}
+
+# Container-local deployment probe; never published to the host.
+http://127.0.0.1:8081 {
+	respond /health "{$AGENTLE_RELEASE}" 200
+}
