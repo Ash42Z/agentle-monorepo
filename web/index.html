@@ -3,24 +3,87 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A home for the services built by Agentle.">
-  <title>Agentle — a home for services</title>
+  <title>Agentle worker</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; min-height: 100svh; display: grid; place-items: center; background: #101820; color: #edf4f5; }
-    main { max-width: 42rem; padding: 3rem 1.5rem; }
-    .badge { color: #79dfbc; letter-spacing: .12em; font-size: .8rem; text-transform: uppercase; }
-    h1 { font-size: clamp(2.5rem, 8vw, 4.5rem); line-height: 1.1; margin: 1rem 0; }
-    p { color: #b7c8ce; font-size: 1.15rem; line-height: 1.7; }
-    footer { border-top: 1px solid #30424b; margin-top: 3rem; padding-top: 1rem; color: #b7c8ce; }
+    body { margin: 0; background: #101820; color: #edf4f5; }
+    main { max-width: 60rem; margin: auto; padding: 2rem 1.5rem; }
+    section { border-top: 1px solid #30424b; padding: 1rem 0; }
+    button, input { font: inherit; padding: .6rem; margin: .3rem; }
+    a { color: #79dfbc; }
+    p { line-height: 1.6; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #error { color: #ffb5b5; }
+    li { margin: 1rem 0; }
   </style>
 </head>
 <body>
-  <main>
-    <span class="badge">Agentle · agentle.cc</span>
-    <h1>A home for what’s next.</h1>
-    <p>This is the first page in a growing collection of services. More tools and experiments will find a home here as they’re built.</p>
-    <footer>Built in one monorepo. Served by Caddy.</footer>
-  </main>
+<main>
+  <h1>Agentle worker</h1>
+  <form id="auth">
+    <label>Admin token <input id="token" type="password" autocomplete="off"></label>
+    <button>Connect / refresh</button>
+    <button id="disconnect" type="button">Disconnect</button>
+  </form>
+  <p>The token stays in memory for this page only. Status refreshes every 30 seconds while connected.</p>
+  <p id="error" role="alert"></p>
+  <p id="health" role="status">Connect to view worker status.</p>
+  <section><h2>Working now</h2><div id="current">—</div></section>
+  <section><h2>Up next</h2><p>Requests appear in arrival order. Waiting requests may be skipped until eligible; later requests on the same conversation wait.</p><ol id="queue"></ol></section>
+  <section><h2>Conversation snapshot</h2>
+    <form id="conversation-form"><label>Issue or original request number <input id="number" type="number" min="1" step="1" required></label><button>Fetch conversation</button></form>
+    <p id="snapshot" role="status">Choose a job or enter its original request number. Shows up to 30 recent user and assistant messages.</p>
+    <div id="messages"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = '', generation = 0, conversationRequest = 0;
+async function api(path) {
+  if (!token) throw Error('Connect with an admin token first.');
+  const response = await fetch(path, { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+  if (response.status === 401) throw Error('Authentication failed. Check the admin token.');
+  if (!response.ok) throw Error(response.status === 404 ? 'Conversation not available yet.' : 'Worker unavailable. Try again shortly.');
+  return response.json();
+}
+function jobView(job) {
+  const row = document.createElement('div');
+  const link = document.createElement('a');
+  link.href = job.url; link.textContent = job.pr ? `PR #${job.pr} (request #${job.number})` : `Issue #${job.number}`;
+  row.append(link, document.createTextNode(` · ${job.state}${job.retryAt ? ' · retry after ' + new Date(job.retryAt).toLocaleString() : ''}${job.blocked ? ' · waiting for an earlier request' : ''}`));
+  const button = document.createElement('button'); button.textContent = 'Fetch conversation'; button.disabled = !job.conversationAvailable;
+  button.onclick = () => { $('number').value = job.number; fetchConversation(job.number); };
+  row.append(button); return row;
+}
+async function refresh() {
+  const version = generation;
+  try {
+    const data = await api('/api/worker');
+    if (version !== generation) return;
+    $('error').textContent = '';
+    $('health').textContent = `${data.state} · ${data.ready ? 'ready' : 'not ready'}${data.lastError ? ' · ' + data.lastError : ''} · last poll: ${data.lastPoll ? new Date(data.lastPoll).toLocaleString() : 'none'}`;
+    $('current').replaceChildren(data.current ? jobView(data.current) : document.createTextNode('Idle — no active job.'));
+    $('queue').replaceChildren(...data.queue.map(job => { const li = document.createElement('li'); li.append(jobView(job)); return li; }));
+    if (!data.queue.length) $('queue').textContent = 'No queued requests.';
+  } catch (error) { if (version === generation) { $('error').textContent = error.message; $('health').textContent = 'Status unavailable; displayed jobs may be stale.'; } }
+}
+async function fetchConversation(number) {
+  const version = generation, request = ++conversationRequest;
+  $('messages').replaceChildren(); $('snapshot').textContent = 'Fetching conversation…';
+  try {
+    const data = await api('/api/worker/conversation/' + encodeURIComponent(number));
+    if (version !== generation || request !== conversationRequest) return;
+    $('snapshot').textContent = `Request #${number} · fetched ${new Date(data.fetchedAt).toLocaleString()}${data.messages.length ? '' : ' · no messages yet'}`;
+    $('messages').replaceChildren(...data.messages.map(message => {
+      const article = document.createElement('article'), role = document.createElement('h3'), text = document.createElement('pre');
+      role.textContent = message.role; text.textContent = message.text; article.append(role, text); return article;
+    }));
+  } catch (error) { if (version === generation && request === conversationRequest) $('snapshot').textContent = error.message; }
+}
+$('auth').onsubmit = event => { event.preventDefault(); generation++; token = $('token').value.trim() || token; $('token').value = ''; refresh(); };
+$('disconnect').onclick = () => { generation++; token = ''; $('token').value = ''; $('messages').replaceChildren(); $('queue').replaceChildren(); $('current').textContent = '—'; $('error').textContent = ''; $('health').textContent = 'Disconnected.'; $('snapshot').textContent = 'Connect to fetch a conversation.'; };
+$('conversation-form').onsubmit = event => { event.preventDefault(); fetchConversation($('number').value); };
+setInterval(() => { if (token) refresh(); }, 30000);
+</script>
 </body>
 </html>
