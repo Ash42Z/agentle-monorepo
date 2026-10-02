@@ -4,6 +4,7 @@ export type Job = {
   id: string;
   number: number;
   prompt: string;
+  source: number | null;
   state: string;
   thread: string | null;
   branch: string | null;
@@ -22,6 +23,8 @@ export class State {
   CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,number INTEGER NOT NULL,prompt TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'queued',thread TEXT,branch TEXT,pr INTEGER,result TEXT,due INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS conversations(number INTEGER PRIMARY KEY,branch TEXT NOT NULL,pr INTEGER,thread TEXT);
   PRAGMA user_version=1;`);
+    if (!(this.db.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).some(c => c.name === "source"))
+      this.db.exec("ALTER TABLE jobs ADD COLUMN source INTEGER");
     if (path !== ":memory:")
       for (const suffix of ["-wal", "-shm"])
         try {
@@ -43,10 +46,10 @@ export class State {
       )
       .run(key, value);
   }
-  enqueue(id: string, number: number, prompt: string) {
+  enqueue(id: string, number: number, prompt: string, source = number) {
     this.db
-      .prepare("INSERT OR IGNORE INTO jobs(id,number,prompt) VALUES(?,?,?)")
-      .run(id, number, prompt);
+      .prepare("INSERT OR IGNORE INTO jobs(id,number,prompt,source) VALUES(?,?,?,?)")
+      .run(id, number, prompt, source);
   }
   next(now = Date.now()) {
     return this.db
@@ -77,6 +80,11 @@ export class State {
         `UPDATE jobs SET ${keys.map((k) => `${k}=?`).join(",")} WHERE id=?`,
       )
       .run(...keys.map((k) => (fields as any)[k]), id);
+  }
+  originNumber(number: number) {
+    return (this.db.prepare(`SELECT number FROM conversations WHERE pr=?
+      UNION ALL SELECT number FROM jobs WHERE pr=? LIMIT 1`).get(number, number) as
+      { number: number } | undefined)?.number ?? number;
   }
   conversation(number: number) {
     return this.db

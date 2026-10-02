@@ -84,9 +84,11 @@ export class Codex extends EventEmitter {
     });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
-  async run(threadId: string, prompt: string) {
+  async run(threadId: string, prompt: string, onPlan?: (text: string) => Promise<void>) {
     return new Promise<string>(async (resolve, reject) => {
       let text = "";
+      let planSent = false;
+      let planDelivery: Promise<void> = Promise.resolve();
       const timer = setTimeout(() => {
         this.close();
         finish(Error("Turn exceeded 6 hours"));
@@ -97,8 +99,17 @@ export class Codex extends EventEmitter {
         if (
           m.method === "item/completed" &&
           m.params.item.type === "agentMessage"
-        )
-          text = m.params.item.text;
+        ) {
+          const item = m.params.item;
+          if (item.phase === "commentary") {
+            if (onPlan && !planSent && item.text?.trim()) {
+              planSent = true;
+              planDelivery = onPlan(item.text);
+              // Handle delivery failures immediately, even while the turn is running.
+              planDelivery.catch(() => {});
+            }
+          } else text = item.text;
+        }
         if (m.method === "turn/completed") {
           const t = m.params.turn;
           t.status === "completed"
@@ -110,7 +121,10 @@ export class Codex extends EventEmitter {
         clearTimeout(timer);
         this.off("notification", handler);
         this.off("stopped", stopped);
-        error ? reject(error) : resolve(value);
+        planDelivery.then(
+          () => error ? reject(error) : resolve(value),
+          reject,
+        );
       };
       this.on("notification", handler);
       this.on("stopped", stopped);
