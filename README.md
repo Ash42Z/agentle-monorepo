@@ -36,7 +36,7 @@ Install `scripts/github_host.py` and `scripts/deploy-entry.sh` in root-owned `/o
 
 Repository Actions secrets: `AGENTLE_DEPLOY_KEY`, `AGENTLE_DEPLOY_HOST`, `AGENTLE_KNOWN_HOSTS` (pin the actual SSH host public key). The production environment uses these repository secrets. CI builds and tests the exact merge commit before deployment.
 
-Host releases live at `/opt/agentle-bot/releases/<SHA>`. Deployment acquires a lock, builds before draining, waits up to six hours for active work, backs up SQLite and recreates the Compose service. A new release starts drained until deployment verifies readiness and explicitly resumes it. Activation is persisted so ordinary restarts resume processing. Readiness checks GitHub polling and ChatGPT authentication. Failed startup restores the previous release; additive schema changes must remain compatible with that version. State lives outside releases. The previous release and database backups are retained. Docker starts at boot; Compose uses `restart: unless-stopped`.
+Host releases live at `/opt/agentle-bot/releases/<SHA>`. Deployment acquires a lock, builds before draining, waits up to six hours for active work, backs up SQLite and recreates the Compose services. Both the controller and web images are built and the Caddyfile validated before draining. Deployment checks the controller and the Caddy release probe; rollback restores both images and removes services absent from the prior release. A new release starts drained until deployment verifies readiness and explicitly resumes it. Activation is persisted so ordinary restarts resume processing. Readiness checks GitHub polling and ChatGPT authentication. Failed startup restores the previous release; additive schema changes must remain compatible with that version. State lives outside releases. The previous release and database backups are retained. Docker starts at boot; Compose uses `restart: unless-stopped`.
 
 The localhost admin API requires `Authorization: Bearer <admin-token>`: `POST /admin/drain`, `POST /admin/resume`, `GET /admin/status`, `GET /ready`. Port 8080 is published only to host loopback. SIGTERM stops collecting new jobs and waits for the current job to finish; an unclean restart preserves workspace state and resumes the durable job.
 
@@ -47,3 +47,19 @@ Protect `main`: require a PR, dismiss stale approvals, require the GitHub Action
 ## Operational limitations
 
 Quota and authentication recovery are tested with protocol fixtures; an actual quota exhaustion cannot be forced safely. Automatic retries preserve changes, but repeated failures can require owner intervention. Only one repository and one coding job are supported. Deployment cannot complete until the initial implementation is merged and successful main CI exists. No public webhook endpoint, custom bot systemd service, zero-downtime upgrade, or automatic paid API fallback is used.
+
+## Public HTTP services
+
+The root `Caddyfile` is the master entry point for `agentle.cc`. Caddy serves `web/index.html`, automatically obtains and renews public certificates, and redirects HTTP to HTTPS. The web image includes its configuration and content, so each merge to `main` deploys an exact, self-contained release through the existing CI deployment workflow. Named Compose volumes retain certificates and Caddy state across releases; do not remove them with `docker compose down -v`.
+
+Before the first deployment, point the domain's A record (and any AAAA record) at this VPS and allow inbound TCP 80/443 and optionally UDP 443 for HTTP/3. Those host ports must be available. Certificate issuance requires working public DNS and inbound access; the internal readiness probe checks the running release, not public DNS or certificate issuance. The probe and Caddy admin API are not exposed publicly, and the controller's authenticated admin API remains on host loopback.
+
+For another service, add it to `compose.yaml` without a host port and add a `handle_path /example/* { reverse_proxy example:3000 }` route before the fallback `handle` in `Caddyfile` (see the commented example). This strips the prefix; use `handle /example/*` if the application expects it. Alternatively, add a new hostname block with `reverse_proxy service:3000` and point that hostname's DNS to the VPS. Include any new service image builds in CI and the pre-drain deployment build phase, plus appropriate readiness checks. Keep private controller endpoints out of public routes.
+
+Local image/configuration checks:
+
+```sh
+docker build -t agentle-web:local -f web/Dockerfile .
+docker run --rm -e AGENTLE_RELEASE=local agentle-web:local caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+AGENTLE_IMAGE=agentle:local AGENTLE_WEB_IMAGE=agentle-web:local AGENTLE_RELEASE=local docker compose config --quiet
+```

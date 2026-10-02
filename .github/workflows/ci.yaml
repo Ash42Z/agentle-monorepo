@@ -18,6 +18,9 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: docker build -t agentle-test .
+      - run: docker build -t agentle-web-test -f web/Dockerfile .
+      - run: docker run --rm -e AGENTLE_RELEASE=test agentle-web-test caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - run: AGENTLE_IMAGE=agentle-test AGENTLE_WEB_IMAGE=agentle-web-test AGENTLE_RELEASE=test docker compose config --quiet
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test

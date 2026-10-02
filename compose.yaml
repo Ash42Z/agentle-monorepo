@@ -25,3 +25,23 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+  caddy:
+    image: ${AGENTLE_WEB_IMAGE:?Set AGENTLE_WEB_IMAGE}
+    restart: unless-stopped
+    environment:
+      AGENTLE_RELEASE: ${AGENTLE_RELEASE:?Set AGENTLE_RELEASE}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+volumes:
+  caddy_data:
+  caddy_config:
