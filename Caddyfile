@@ -9,6 +9,10 @@ agentle.cc {
 	# handle_path /example/* {
 	#     reverse_proxy example:3000
 	# }
+	# Expose only read-only dashboard routes; the controller checks bearer auth.
+	handle /api/worker* {
+		reverse_proxy bot:8080
+	}
 	handle {
 		root * /srv
 		file_server

@@ -63,3 +63,11 @@ docker build -t agentle-web:local -f web/Dockerfile .
 docker run --rm -e AGENTLE_RELEASE=local agentle-web:local caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 AGENTLE_IMAGE=agentle:local AGENTLE_WEB_IMAGE=agentle-web:local AGENTLE_RELEASE=local docker compose config --quiet
 ```
+
+## Worker dashboard
+
+The home page shows the active request and PR, execution state, and pending requests in arrival order, including retry times and requests blocked by earlier work on the same conversation. Status refreshes every 30 seconds. Connect using the admin token over HTTPS; the page keeps it only in memory and clears it on disconnect or reload.
+
+Use **Fetch conversation** beside a job, or enter an original request number (including a completed request), to fetch a point-in-time snapshot of its latest 30 user and assistant messages. Messages are capped at 20,000 characters each. Tool output is excluded. Fetching uses read-only Codex `thread/read`; it does not resume work. If Codex is disconnected or the thread cannot be read, the page reports that the conversation is unavailable and lets you retry.
+
+Caddy proxies only `/api/worker*` to the controller. `GET /api/worker` and `GET /api/worker/conversation/<original-request-number>` require the existing bearer admin token and return uncached responses. No controller credentials are embedded in the web image. Admin drain/resume and readiness endpoints remain outside the public proxy route.

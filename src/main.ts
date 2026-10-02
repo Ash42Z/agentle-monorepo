@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import { State, classify, quotaDelay, exhausted, Job } from "./state.js";
 import { GitHub } from "./github.js";
 import { Codex } from "./codex.js";
+import { workerSnapshot, transcript } from "./worker.js";
 import { Workspaces } from "./workspace.js";
 const data = process.env.AGENTLE_DATA ?? "/data";
 mkdirSync(data, { recursive: true });
@@ -25,6 +26,7 @@ let draining = state.get("activatedRelease") !== release,
   authReady = false,
   lastPoll: string | null = null,
   lastError: string | null = null;
+let activeJobId: string | null = null;
 let codex: Codex | null = null;
 async function connect() {
   if (codex) return codex;
@@ -250,6 +252,7 @@ async function tick() {
   const job = state.next();
   if (!job) return;
   activeJobs = 1;
+  activeJobId = job.id;
   try {
     await execute(job);
     lastError = null;
@@ -288,9 +291,10 @@ async function tick() {
     } catch {}
   } finally {
     activeJobs = 0;
+    activeJobId = null;
   }
 }
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const supplied = Buffer.from(req.headers.authorization ?? "");
   const expected = Buffer.from("Bearer " + admin);
   if (
@@ -298,6 +302,34 @@ const server = createServer((req, res) => {
     !timingSafeEqual(supplied, expected)
   ) {
     res.writeHead(401).end();
+    return;
+  }
+  if (req.method === "GET" && req.url?.startsWith("/api/worker")) {
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    if (req.url === "/api/worker") {
+      res.end(JSON.stringify({
+        ...workerSnapshot(state, cfg.repository, activeJobId),
+        state: stopping ? "stopping" : draining ? "draining" : "running",
+        ready: ready && authReady, lastError, lastPoll,
+      }));
+      return;
+    }
+    const match = /^\/api\/worker\/conversation\/([1-9][0-9]*)$/.exec(req.url);
+    const conversation = match ? state.conversation(Number(match[1])) : undefined;
+    if (!conversation?.thread) {
+      res.writeHead(404).end(JSON.stringify({ error: "Conversation not available" }));
+      return;
+    }
+    try {
+      // Read only: fetching a transcript must never resume or start a turn.
+      const c = codex;
+      if (!c) throw Error("Codex unavailable");
+      const result = await c.rpc("thread/read", { threadId: conversation.thread, includeTurns: true });
+      res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), messages: transcript(result.thread) }));
+    } catch {
+      res.writeHead(503).end(JSON.stringify({ error: "Conversation temporarily unavailable; retry when Codex is connected." }));
+    }
     return;
   }
   if (req.method === "POST" && req.url === "/admin/drain") draining = true;
