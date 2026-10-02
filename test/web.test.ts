@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
-test("dashboard authenticates, renders untrusted text safely, fetches snapshots and disconnects", async () => {
+test("dashboard fetches without controller credentials and renders untrusted snapshots safely", async () => {
   class Element {
     textContent = "";
     value = "";
@@ -34,11 +34,10 @@ test("dashboard authenticates, renders untrusted text safely, fetches snapshots 
     },
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
-  node("token").value = "test-token";
-  node("auth").onsubmit({ preventDefault() {} });
   await settle();
-  assert.equal(requests[0].options.headers.Authorization, "Bearer test-token");
-  assert.equal(node("token").value, "");
+  assert.equal(requests[0].options.headers, undefined);
+  assert.equal(requests[0].options.credentials, "same-origin");
+  assert.doesNotMatch(readFileSync("web/index.html", "utf8"), /id="token"|Bearer|Admin token/);
   assert.equal(node("current").children[0].children[0].textContent, "PR #15 (request #12)");
   assert.equal(node("queue").children.length, 1);
   node("number").value = "12";
@@ -46,10 +45,7 @@ test("dashboard authenticates, renders untrusted text safely, fetches snapshots 
   await settle();
   assert.equal(requests[1].path, "/api/worker/conversation/12");
   assert.equal(node("messages").children[0].children[1].textContent, "<script>untrusted</script>");
-  node("disconnect").onclick();
-  assert.equal(node("messages").children.length, 0);
-  node("conversation-form").onsubmit({ preventDefault() {} });
+  node("refresh").onclick();
   await settle();
-  assert.equal(requests.length, 2);
-  assert.match(node("snapshot").textContent, /Connect/);
+  assert.equal(requests.length, 3);
 });

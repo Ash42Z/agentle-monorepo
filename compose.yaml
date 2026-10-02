@@ -25,6 +25,17 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+  dashboard:
+    image: ${AGENTLE_IMAGE:?Set AGENTLE_IMAGE}
+    command: ["./node_modules/.bin/tsx", "src/dashboard-main.ts"]
+    restart: unless-stopped
+    init: true
+    environment:
+      AGENTLE_RELEASE: ${AGENTLE_RELEASE:?Set AGENTLE_RELEASE}
+      AGENTLE_DASHBOARD_USER: ${AGENTLE_DASHBOARD_USER:-Ash42Z}
+    volumes:
+      - /root/.config/agentle/admin-token:/run/secrets/controller-token:ro
+      - /root/.config/agentle/dashboard-password:/run/secrets/dashboard-password:ro
   caddy:
     image: ${AGENTLE_WEB_IMAGE:?Set AGENTLE_WEB_IMAGE}
     restart: unless-stopped

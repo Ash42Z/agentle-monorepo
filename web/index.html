@@ -20,14 +20,10 @@
 <body>
 <main>
   <h1>Agentle worker</h1>
-  <form id="auth">
-    <label>Admin token <input id="token" type="password" autocomplete="off"></label>
-    <button>Connect / refresh</button>
-    <button id="disconnect" type="button">Disconnect</button>
-  </form>
-  <p>The token stays in memory for this page only. Status refreshes every 30 seconds while connected.</p>
+  <button id="refresh" type="button">Refresh status</button>
+  <p>Status refreshes every 30 seconds. Sign in with your dashboard account when prompted.</p>
   <p id="error" role="alert"></p>
-  <p id="health" role="status">Connect to view worker status.</p>
+  <p id="health" role="status">Loading worker status…</p>
   <section><h2>Working now</h2><div id="current">—</div></section>
   <section><h2>Up next</h2><p>Requests appear in arrival order. Waiting requests may be skipped until eligible; later requests on the same conversation wait.</p><ol id="queue"></ol></section>
   <section><h2>Conversation snapshot</h2>
@@ -38,11 +34,10 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let token = '', generation = 0, conversationRequest = 0;
+let generation = 0, conversationRequest = 0;
 async function api(path) {
-  if (!token) throw Error('Connect with an admin token first.');
-  const response = await fetch(path, { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
-  if (response.status === 401) throw Error('Authentication failed. Check the admin token.');
+  const response = await fetch(path, { credentials: 'same-origin', cache: 'no-store' });
+  if (response.status === 401) throw Error('Sign in with your dashboard account to continue.');
   if (!response.ok) throw Error(response.status === 404 ? 'Conversation not available yet.' : 'Worker unavailable. Try again shortly.');
   return response.json();
 }
@@ -80,10 +75,10 @@ async function fetchConversation(number) {
     }));
   } catch (error) { if (version === generation && request === conversationRequest) $('snapshot').textContent = error.message; }
 }
-$('auth').onsubmit = event => { event.preventDefault(); generation++; token = $('token').value.trim() || token; $('token').value = ''; refresh(); };
-$('disconnect').onclick = () => { generation++; token = ''; $('token').value = ''; $('messages').replaceChildren(); $('queue').replaceChildren(); $('current').textContent = '—'; $('error').textContent = ''; $('health').textContent = 'Disconnected.'; $('snapshot').textContent = 'Connect to fetch a conversation.'; };
+$('refresh').onclick = () => refresh();
 $('conversation-form').onsubmit = event => { event.preventDefault(); fetchConversation($('number').value); };
-setInterval(() => { if (token) refresh(); }, 30000);
+refresh();
+setInterval(refresh, 30000);
 </script>
 </body>
 </html>
