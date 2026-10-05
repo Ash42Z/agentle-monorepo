@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { State } from "../src/state.js";
 import { execute } from "../src/execute.js";
 
-function fixture({ merged = false, closedIssue = false, changed = true } = {}) {
+function fixture({ merged = false, closedIssue = false, changed = true, closedPR = false } = {}) {
   const state = new State(":memory:");
   state.saveConversation(1, "agentle/1", 10, "saved-thread");
   state.enqueue("old", 1, "original");
@@ -12,13 +12,16 @@ function fixture({ merged = false, closedIssue = false, changed = true } = {}) {
   const comments: [number, string, string][] = [];
   const branches: string[] = [];
   const resumed: string[] = [];
+  const published: number[] = [];
+  let ran = false;
   const context = {
     state, cfg: { repository: "Ash42Z/agentle-monorepo", allowedUser: "Ash42Z" },
     gh: {
       async api(path: string, method?: string) {
         if (path === "/issues/1") return { state: closedIssue ? "closed" : "open", title: "Task" };
         if (path === "") return { default_branch: "main" };
-        if (path === "/pulls/10") return { state: merged ? "closed" : "open", merged };
+        if (path === "/pulls/11") return { state: "open" };
+        if (path === "/pulls/10") return { state: merged || closedPR ? "closed" : "open", merged };
         if (path.startsWith("/pulls?")) return merged ? [] : [{ number: 10 }];
         if (path === "/pulls" && method === "POST") return { number: 11 };
         throw Error(path);
@@ -27,7 +30,9 @@ function fixture({ merged = false, closedIssue = false, changed = true } = {}) {
     },
     work: {
       async prepare() { return "/workspace/1"; }, async refresh() {}, path() { return "/workspace/1"; },
-      async changed() { return changed; }, async publish() {},
+      async changed() { return changed; },
+      async snapshot() { return ran && changed ? "after" : "before"; },
+      async publish() { published.push(1); },
       async continueFromBase(_number: number, branch: string, base: string) { branches.push(`${branch}:${base}`); },
     },
     async connect() {
@@ -37,13 +42,14 @@ function fixture({ merged = false, closedIssue = false, changed = true } = {}) {
           return {};
         },
         async run(_thread: string, _prompt: string, onPlan?: (text: string) => Promise<void>) {
+          ran = true;
           await onPlan?.("I’ll inspect the request, implement it, and verify the changes.");
           return "Implemented and verified.";
         },
       };
     },
   };
-  return { state, context, comments, branches, resumed };
+  return { state, context, comments, branches, resumed, published };
 }
 
 test("PR comments receive a plan and result without repeated issue links", async () => {
@@ -97,5 +103,30 @@ test("publication retry reconciles the new PR link without rerunning implementat
     assert.deepEqual(f.resumed, ["saved-thread"]);
     assert.equal(f.comments.filter(c => c[1].endsWith("-link")).length, 1);
     assert.equal(f.state.next(), undefined);
+  } finally { f.state.db.close(); }
+});
+
+for (const closedPR of [false, true]) {
+  test(`conversation on ${closedPR ? "closed" : "open"} PR replies at source without publication`, async () => {
+    const f = fixture({ changed: false, closedPR });
+    try {
+      await execute(f.state.next()!, f.context);
+      assert.deepEqual(f.comments.map(c => c[0]), [10, 10]);
+      assert.deepEqual(f.published, []);
+      assert.deepEqual(f.resumed, ["saved-thread"]);
+      assert.equal(f.state.next(), undefined);
+    } finally { f.state.db.close(); }
+  });
+}
+
+test("resumption retains the baseline of interrupted work", async () => {
+  const f = fixture({ changed: false });
+  f.state.set("comment-2-workspace-baseline", "original-before-interruption");
+  f.state.update("comment-2", { thread: "interrupted-thread" });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.published, [1]);
+    assert.deepEqual(f.resumed, ["interrupted-thread"]);
+    assert.equal(f.state.get("comment-2-workspace-baseline"), "original-before-interruption");
   } finally { f.state.db.close(); }
 });

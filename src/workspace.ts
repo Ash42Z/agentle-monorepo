@@ -8,13 +8,18 @@ import {
   stat,
   readdir,
   lchown,
+  readFile,
+  readlink,
+  lstat,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { GitHub } from "./github.js";
 export async function command(
   args: string[],
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  trim = true,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const p = spawn(args[0], args.slice(1), {
@@ -31,7 +36,7 @@ export async function command(
     p.on("error", reject);
     p.on("exit", (code) =>
       code === 0
-        ? resolve(out.trim())
+        ? resolve(trim ? out.trim() : out)
         : reject(Error(`${args[0]} ${args[1]} failed (${code})`)),
     );
   });
@@ -190,6 +195,21 @@ export class Workspaces {
     ], dir);
     await command([...args, "-c", "core.hooksPath=/dev/null", "checkout", "-B", branch, `origin/${base}`], dir);
     await this.ownFiles(dir);
+  }
+  async snapshot(number: number) {
+    const dir = this.path(number);
+    const args = ["git", "-c", `safe.directory=${dir}`];
+    const hash = createHash("sha256");
+    hash.update(await command([...args, "rev-parse", "HEAD"], dir));
+    hash.update(await command([...args, "diff", "--binary", "HEAD"], dir, process.env, false));
+    const untracked = await command([...args, "ls-files", "--others", "--exclude-standard", "-z"], dir, process.env, false);
+    for (const file of untracked.split("\0").filter(Boolean).sort()) {
+      const path = join(dir, file);
+      hash.update(file + "\0");
+      hash.update((await lstat(path)).isSymbolicLink() ? await readlink(path) : await readFile(path));
+      hash.update("\0");
+    }
+    return hash.digest("hex");
   }
   async changed(number: number, base: string) {
     const dir = this.path(number);
