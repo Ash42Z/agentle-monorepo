@@ -130,3 +130,33 @@ test("resumption retains the baseline of interrupted work", async () => {
     assert.equal(f.state.get("comment-2-workspace-baseline"), "original-before-interruption");
   } finally { f.state.db.close(); }
 });
+
+test("quota pause stops execution before the agent turn and publication", async () => {
+  const f = fixture();
+  const connect = f.context.connect;
+  f.context.connect = async () => {
+    const c = await connect();
+    return { ...c, async rpc() { return { rateLimits: { primary: { usedPercent: 100 } } }; } };
+  };
+  try {
+    await execute(f.state.next()!, f.context);
+    const waiting = f.state.next(Number.MAX_SAFE_INTEGER)!;
+    assert.equal(waiting.state, "waiting");
+    assert.equal(waiting.attempts, 1);
+    assert.equal(f.state.conversation(1)?.thread, "saved-thread");
+    assert.deepEqual(f.resumed, []);
+    assert.deepEqual(f.published, []);
+    assert.equal(f.comments.length, 1);
+    assert.match(f.comments[0][2], /usage limit/);
+  } finally { f.state.db.close(); }
+});
+
+test("closed PR with local edits reports the blocker without publishing", async () => {
+  const f = fixture({ closedPR: true });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.published, []);
+    assert.match(f.comments[1][2], /Publication is blocked/);
+    assert.equal(f.state.next(), undefined);
+  } finally { f.state.db.close(); }
+});

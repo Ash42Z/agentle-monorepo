@@ -13,6 +13,12 @@ export type Job = {
   due: number;
   attempts: number;
 };
+export type Conversation = {
+  branch: string;
+  pr: number | null;
+  thread: string | null;
+};
+
 export class State {
   db: DatabaseSync;
   constructor(path: string) {
@@ -90,7 +96,7 @@ export class State {
     return this.db
       .prepare("SELECT * FROM conversations WHERE number=?")
       .get(number) as
-      | { branch: string; pr: number | null; thread: string | null }
+      | Conversation
       | undefined;
   }
   saveConversation(
