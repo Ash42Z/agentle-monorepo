@@ -58,3 +58,29 @@ test('default timer functions are called without a player receiver in browsers',
   await context.player.play(track.preview, .5);
   context.player.stop();
 });
+test('studio catalog excludes EPs, singles and labelled non-studio releases', () => {
+  assert.equal(game.studioAlbum({ record_type: 'album', title: 'A Night at the Opera' }), true);
+  for (const title of ['Live at Wembley', 'Greatest Hits', 'The Remix Collection', 'Anthology', 'Unplugged']) {
+    assert.equal(game.studioAlbum({ record_type: 'album', title }), false);
+  }
+  for (const record_type of ['ep', 'single', undefined]) {
+    assert.equal(game.studioAlbum({ record_type, title: 'Songs' }), false);
+  }
+  assert.equal(game.studioTrack({ title: 'Song', title_version: '(Live)' }), false);
+  assert.equal(game.studioTrack({ title: 'Song (Remix)' }), false);
+  assert.equal(game.studioTrack({ title: 'Song' }), true);
+  assert.equal(game.studioTrack({ title: 'Live Forever' }), true);
+  assert.equal(game.studioTrack({ title: 'Song - Live at Wembley' }), false);
+});
+test('catalog follows pagination using local routes and stops on empty pages', async () => {
+  const paths: string[] = [];
+  const result = await game.catalog(async (path: string) => {
+    paths.push(path);
+    return paths.length === 1 ? { data: [{ id: 1 }], next: 'https://untrusted.example' } : { data: [{ id: 2 }] };
+  }, 'artists/7/albums');
+  assert.deepEqual(result, [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(paths, ['artists/7/albums?limit=100&index=0', 'artists/7/albums?limit=100&index=100']);
+  let calls = 0;
+  assert.deepEqual(await game.catalog(async () => { calls++; return { data: [], next: 'more' }; }, 'albums/1/tracks'), []);
+  assert.equal(calls, 1);
+});

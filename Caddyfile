@@ -17,7 +17,27 @@ agentle.cc {
 	}
 	@tracks path_regexp artist ^/songspot/api/artists/([0-9]+)/tracks$
 	handle @tracks {
-		rewrite * /artist/{re.artist.1}/top?limit=100
+		rewrite * /artist/{re.artist.1}/top?{query}
+		reverse_proxy https://api.deezer.com {
+			header_up Host api.deezer.com
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+		}
+	}
+	@albums path_regexp albums ^/songspot/api/artists/([0-9]+)/albums$
+	handle @albums {
+		rewrite * /artist/{re.albums.1}/albums?{query}
+		reverse_proxy https://api.deezer.com {
+			header_up Host api.deezer.com
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+		}
+	}
+	@albumtracks path_regexp albumtracks ^/songspot/api/albums/([0-9]+)/tracks$
+	handle @albumtracks {
+		rewrite * /album/{re.albumtracks.1}/tracks?{query}
 		reverse_proxy https://api.deezer.com {
 			header_up Host api.deezer.com
 			header_up -Cookie
