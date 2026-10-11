@@ -38,3 +38,21 @@ export class ClipPlayer {
     this.timer = this.schedule(() => this.stop(), seconds * 1000);
   }
 }
+
+// Deezer marks singles/EPs separately, but live and compilation albums need title checks.
+const nonStudio = /\b(live|remix(?:es|ed)?|compilation|greatest hits|best of|collection|anthology|karaoke|tribute|soundtrack|in concert|concert|unplugged)\b/i;
+export function studioAlbum(album) {
+  return album.record_type === 'album' && !nonStudio.test(album.title || '');
+}
+export function studioTrack(track) {
+  const qualifiers = (track.title || '').match(/\([^)]*\)|\[[^\]]*\]|\s[-–]\s.*/g) || [];
+  return !nonStudio.test([track.title_version || '', ...qualifiers].join(' '));
+}
+export async function catalog(api, path) {
+  const items = [];
+  for (let index = 0; ; index += 100) {
+    const page = await api(`${path}?limit=100&index=${index}`);
+    items.push(...page.data);
+    if (!page.next || !page.data.length) return items;
+  }
+}

@@ -15,8 +15,10 @@
 <form id="artist-search"><label for="artist-query">Find an artist</label><div class="input-row"><input id="artist-query" required maxlength="100" placeholder="Search any artist…" autocomplete="off"><button>Search</button></div></form>
 <div id="search-results" class="results"></div>
 <div id="selected" class="chips" aria-label="Selected artists"></div>
+<label class="album-filter"><input type="checkbox" id="studio-only" checked> Studio albums only</label>
+<p class="hint">Excludes singles, EPs and releases labelled live, compilation or remix. Deezer metadata may not identify every non-studio release.</p>
 <button id="start" disabled>Let's play →</button>
-<p class="hint">Choose up to 8 artists. Songs come from their available Deezer previews.</p>
+<p class="hint">Choose as many artists as you like. Songs come from their available Deezer previews.</p>
 </section>
 <section id="game" hidden>
 <div class="game-top"><span id="round-number" class="eyebrow"></span><button id="change" class="secondary">Change artists</button></div>

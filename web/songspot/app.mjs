@@ -1,4 +1,4 @@
-import { Round, ClipPlayer, lengths, playableTracks } from './game.mjs';
+import { Round, ClipPlayer, lengths, playableTracks, studioAlbum, studioTrack, catalog } from './game.mjs';
 const $ = id => document.getElementById(id);
 const selected = new Map(), cache = new Map();
 let tracks = [], deck = [], round, count = 0, wins = 0, points = 0, searchVersion = 0;
@@ -10,11 +10,11 @@ async function api(path) {
   if (!response.ok) throw Error('Music search is unavailable. Please try again.');
   const result = await response.json();
   if (result.error || !Array.isArray(result.data)) throw Error('Deezer could not return songs. Please try again shortly.');
-  return result.data;
+  return result;
 }
 function artistChips() {
   $('selected').replaceChildren(...Array.from(selected.values(), artist => {
-    const button = document.createElement('button'); button.textContent = `${artist.name} ×`;
+    const button = document.createElement('button'); button.textContent = `${artist.name} (ID ${artist.id}) ×`;
     button.setAttribute('aria-label', `Remove ${artist.name}`);
     button.onclick = () => { selected.delete(artist.id); artistChips(); };
     return button;
@@ -26,14 +26,22 @@ $('artist-search').onsubmit = async event => {
   const query = $('artist-query').value.trim(); if (!query) return;
   status('Finding artists…'); $('search-results').replaceChildren();
   try {
-    const artists = await api(`artists?q=${encodeURIComponent(query)}`);
+    const { data: artists } = await api(`artists?q=${encodeURIComponent(query)}`);
     if (version !== searchVersion) return;
     $('search-results').replaceChildren(...artists.filter(a => Number.isSafeInteger(a.id) && a.id > 0 && typeof a.name === 'string').map(artist => {
-      const button = document.createElement('button'); button.textContent = `+ ${artist.name}`;
+      const card = document.createElement('div'); card.className = 'artist-card';
+      const button = document.createElement('button');
+      if (/^https:\/\//.test(artist.picture_medium || '')) {
+        const photo = document.createElement('img'); photo.src = artist.picture_medium; photo.alt = ''; photo.loading = 'lazy'; button.append(photo);
+      }
+      const details = document.createElement('span'); details.textContent = `+ ${artist.name}`;
+      const info = document.createElement('small'); info.textContent = `${Number(artist.nb_album) || 0} albums · ${(Number(artist.nb_fan) || 0).toLocaleString()} fans · ID ${artist.id}`;
+      details.append(info); button.append(details);
+      const profile = document.createElement('a'); profile.href = `https://www.deezer.com/artist/${artist.id}`; profile.target = '_blank'; profile.rel = 'noopener noreferrer'; profile.textContent = 'View artist ↗';
+      card.append(button, profile);
       button.onclick = () => {
-        if (selected.size >= 8 && !selected.has(artist.id)) { status('Choose up to 8 artists. Remove one to add another.'); return; }
         selected.set(artist.id, artist); artistChips(); status(`${artist.name} selected.`);
-      }; return button;
+      }; return card;
     }));
     status(artists.length ? 'Choose an artist from the results.' : 'No artists found. Try another name.');
   } catch (error) { if (version === searchVersion) status(error.message); }
@@ -42,10 +50,27 @@ $('start').onclick = async () => {
   $('start').disabled = true; status('Finding playable songs…');
   const artists = [...selected.values()];
   try {
-    const results = await Promise.all(artists.map(async artist => {
-      if (!cache.has(artist.id)) cache.set(artist.id, await api(`artists/${artist.id}/tracks`));
-      return cache.get(artist.id);
-    }));
+    const studioOnly = $('studio-only').checked;
+    const results = [];
+    // Load sequentially so larger selections do not flood the music API.
+    for (const artist of artists) {
+      const key = `${artist.id}:${studioOnly}`;
+      if (!cache.has(key)) {
+        let songs;
+        if (studioOnly) {
+          const albums = await catalog(api, `artists/${artist.id}/albums`);
+          songs = [];
+          for (const album of albums.filter(studioAlbum)) {
+            const albumTracks = await catalog(api, `albums/${album.id}/tracks`);
+            songs.push(...albumTracks.filter(studioTrack).filter(track => track.artist?.id === artist.id));
+          }
+        } else {
+          songs = await catalog(api, `artists/${artist.id}/tracks`);
+        }
+        cache.set(key, songs);
+      }
+      results.push(cache.get(key));
+    }
     tracks = playableTracks(results.flat());
     if (!tracks.length) throw Error('No playable previews for these artists. Please choose another artist.');
     searchVersion++; $('setup').hidden = true; $('game').hidden = false;
