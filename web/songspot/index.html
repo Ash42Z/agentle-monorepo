@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Songspot · Name that song</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><a class="brand" href="./">◉ Songspot</a><span>A little sound. A big guess.</span></header>
+<main>
+<section id="setup">
+<p class="eyebrow">YOUR ARTISTS. YOUR GAME.</p>
+<h1>How fast can you<br>name that song?</h1>
+<p class="intro">Start with half a second. Guess the song, or unlock a little more.<br>Pick the artists you love and put your ears to the test.</p>
+<form id="artist-search"><label for="artist-query">Find an artist</label><div class="input-row"><input id="artist-query" required maxlength="100" placeholder="Search any artist…" autocomplete="off"><button>Search</button></div></form>
+<div id="search-results" class="results"></div>
+<div id="selected" class="chips" aria-label="Selected artists"></div>
+<button id="start" disabled>Let's play →</button>
+<p class="hint">Choose up to 8 artists. Songs come from their available Deezer previews.</p>
+</section>
+<section id="game" hidden>
+<div class="game-top"><span id="round-number" class="eyebrow"></span><button id="change" class="secondary">Change artists</button></div>
+<h1>Name that song.</h1>
+<p id="score"></p>
+<div class="sound-card"><div class="bars" aria-hidden="true">▂ ▅ ▃ █ ▆ ▂ ▇ ▄ ▆ ▃ ▅ ▂</div><button id="play">▶ Play clip</button><p id="duration"></p><ol id="steps" aria-label="Clip lengths"></ol></div>
+<form id="guess-form"><label for="guess">Your guess</label><div class="input-row"><input id="guess" required list="songs" autocomplete="off" placeholder="Type or choose a song title"><button id="submit">Guess</button></div><datalist id="songs"></datalist></form>
+<button id="skip" class="secondary">Skip → hear more</button>
+<div id="answer" hidden><h2 id="answer-title"></h2><p id="answer-artist"></p><a id="deezer" target="_blank" rel="noopener noreferrer">Listen on Deezer ↗</a></div>
+<button id="next" hidden>Next song →</button>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+</main>
+<footer>0.5s → 2s → 8s → 15s <span>Music previews from Deezer. Availability varies by region.</span></footer>
+<script type="module" src="app.mjs"></script>
+</body></html>

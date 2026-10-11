@@ -5,6 +5,33 @@
 # Add future service routes inside this block, before the fallback handle.
 agentle.cc {
 	encode zstd gzip
+	redir /songspot /songspot/ 308
+	handle /songspot/api/artists {
+		rewrite * /search/artist?{query}&limit=12
+		reverse_proxy https://api.deezer.com {
+			header_up Host api.deezer.com
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+		}
+	}
+	@tracks path_regexp artist ^/songspot/api/artists/([0-9]+)/tracks$
+	handle @tracks {
+		rewrite * /artist/{re.artist.1}/top?limit=100
+		reverse_proxy https://api.deezer.com {
+			header_up Host api.deezer.com
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+		}
+	}
+	handle /songspot/api/* {
+		respond "Not found" 404
+	}
+	handle /songspot/* {
+		root * /srv
+		file_server
+	}
 	# Example (add a matching Compose service first):
 	# handle_path /example/* {
 	#     reverse_proxy example:3000
