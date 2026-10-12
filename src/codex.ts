@@ -138,6 +138,26 @@ export class Codex extends EventEmitter {
       }
     });
   }
+  async stop() {
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+    // EOF lets app-server flush its thread state and stop MCP children normally.
+    await new Promise<void>((resolve, reject) => {
+      const force = setTimeout(() => this.child.kill("SIGKILL"), 5000);
+      const timeout = setTimeout(() => finish(Error("Codex shutdown timed out")), 10_000);
+      const finish = (error?: Error) => {
+        clearTimeout(force);
+        clearTimeout(timeout);
+        this.child.off("exit", exited);
+        this.child.off("error", failed);
+        error ? reject(error) : resolve();
+      };
+      const exited = () => finish();
+      const failed = (error: Error) => finish(error);
+      this.child.once("exit", exited);
+      this.child.once("error", failed);
+      this.child.stdin.end();
+    });
+  }
   close() {
     this.child.kill("SIGTERM");
   }

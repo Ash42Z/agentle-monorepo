@@ -11,6 +11,8 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
   const switches: string[] = [], resumes: string[] = [], publications: string[] = [];
   const reads: string[] = [];
   let config: any, prompt = "", created = false;
+  const connections: boolean[] = [];
+  const instructions: string[] = [];
   let run: (call: (name: string, args: any) => Promise<any>) => Promise<string> = async () => "Verified.";
   const context = {
     state, cfg: { repository: "Ash42Z/agentle-monorepo", allowedUser: "Ash42Z" },
@@ -35,10 +37,11 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       async changed() { return changed; }, async publish(_number: number, branch: string) { publications.push(branch); },
       async continueFromBase(_number: number, branch: string, base: string) { switches.push(`${branch}:${base}`); },
     },
-    async connect() {
+    async connect(fresh = false) {
+      connections.push(fresh);
       return {
         async rpc(method: string, params?: any) {
-          if (method === "thread/resume") { resumes.push(params.threadId); config = params.config["mcp_servers.agentle_github"]; }
+          if (method === "thread/resume") { resumes.push(params.threadId); instructions.push(params.developerInstructions); config = params.config["mcp_servers.agentle_github"]; }
           return {};
         },
         async run(_thread: string, text: string) {
@@ -54,7 +57,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       };
     },
   };
-  return { state, context, comments, switches, resumes, publications, reads, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
+  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
 }
 
 test("issue replies stay on issue even with an associated PR; no automatic publication", async () => {
@@ -266,4 +269,40 @@ test("quota waits keep source, thread and workspace", async () => {
     assert.equal(f.state.conversation(19)?.branch, "agentle/19");
     assert.equal(f.state.next(), undefined);
   } finally { f.state.db.close(); }
+});
+
+
+test("every job cold-resumes the saved thread with current publication instructions", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    assert.equal((await call("github_publish", {})).isError, undefined);
+    return "Verified.";
+  });
+  try {
+    await execute(f.state.next()!, f.context);
+    f.state.enqueue("comment-3", 19, "Another update", 19);
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.connections, [true, true]);
+    assert.deepEqual(f.resumes, ["saved-thread", "saved-thread"]);
+    assert.deepEqual(f.publications, ["agentle/19", "agentle/19"]);
+    assert.equal(f.reads.filter(path => path === "/pulls").length, 0);
+    for (const instructions of f.instructions) {
+      assert.match(instructions, /You decide.*create a new PR or update an existing PR/);
+      assert.match(instructions, /github_publish performs the commit and push immediately/);
+      assert.match(instructions, /does not publish automatically when your turn ends/);
+    }
+  } finally { f.state.db.close(); }
+});
+
+test("new PR publication needs metadata and does not push when it is missing", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    await call("github_workspace", { pr: null, key: "new" });
+    const result = await call("github_publish", {});
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /Supply title and body/);
+    assert.deepEqual(f.publications, []);
+    return "Metadata needed.";
+  });
+  try { await execute(f.state.next()!, f.context); } finally { f.state.db.close(); }
 });
