@@ -13,6 +13,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
   let config: any, prompt = "", created = false;
   const connections: boolean[] = [];
   const instructions: string[] = [];
+  const reconciliations: boolean[] = [];
   const injections: any[] = [];
   let run: (call: (name: string, args: any) => Promise<any>) => Promise<string> = async () => "Verified.";
   const context = {
@@ -35,7 +36,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
     },
     work: {
       async prepare() { return "/workspace/19"; }, async refresh() {}, path() { return "/workspace/19"; },
-      async changed() { return changed; }, async publish(_number: number, branch: string) { publications.push(branch); },
+      async changed() { return changed; }, async publish(_number: number, branch: string, _base: string, _job: string, reconcile = false) { publications.push(branch); reconciliations.push(reconcile); },
       async continueFromBase(_number: number, branch: string, base: string) { switches.push(`${branch}:${base}`); },
     },
     async connect(fresh = false) {
@@ -60,7 +61,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       };
     },
   };
-  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, injections, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
+  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, injections, reconciliations, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
 }
 
 test("issue replies stay on issue even with an associated PR; no automatic publication", async () => {
@@ -101,6 +102,7 @@ test("agent reads issue context, comments, publishes existing PR and comments ag
     await execute(f.state.next()!, f.context);
     assert.deepEqual(f.comments.map(c => c[0]), [19, 19, 20]);
     assert.deepEqual(f.publications, ["agentle/19"]);
+    assert.deepEqual(f.reconciliations, [true]);
     assert.equal(f.state.conversation(19)?.thread, "saved-thread");
   } finally { f.state.db.close(); }
 });
@@ -119,6 +121,7 @@ test("closed PR does not block discussion; agent chooses a new PR when needed", 
     await execute(f.state.next()!, f.context);
     assert.deepEqual(f.switches, ["agentle/19-comment-2-followup:main"]);
     assert.equal(f.state.conversation(19)?.pr, 22);
+    assert.deepEqual(f.reconciliations, [false]);
     assert.equal(f.state.conversation(19)?.thread, "saved-thread");
     assert.equal(f.state.originNumber(22), 19);
     assert.deepEqual(f.comments.map(c => c[0]), [19]);

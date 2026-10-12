@@ -57,7 +57,7 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
     }
     if (!conversation!.pr && (!title || !body))
       throw Error("Supply title and body when creating a new PR");
-    await work.publish(job.number, conversation!.branch, base, job.id);
+    await work.publish(job.number, conversation!.branch, base, job.id, Boolean(conversation!.pr));
     let pr = conversation!.pr;
     if (!pr) {
       const found = await gh.api(`/pulls?state=open&head=${cfg.repository.split("/")[0]}:${conversation!.branch}`);
@@ -191,7 +191,7 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
     state.update(job.id, { state: "done" });
     return;
   }
-  await work.publish(job.number, conversation.branch, base, job.id);
+  await work.publish(job.number, conversation.branch, base, job.id, Boolean(conversation.pr));
   let pr = conversation.pr;
   if (!issue.pull_request) {
     const found = await gh.api(

@@ -22,17 +22,23 @@ export async function command(
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let out = "";
+    let out = "", stderr = "";
     p.stdout.on("data", (b) => {
       out += b;
       if (out.length > 4_000_000) p.kill();
     });
-    p.stderr.on("data", () => {});
+    // Do not expose raw stderr: Git may include authentication material in URLs.
+    p.stderr.on("data", b => { stderr = (stderr + b).slice(-16_000); });
     p.on("error", reject);
     p.on("exit", (code) =>
       code === 0
         ? resolve(out.trim())
-        : reject(Error(`${args[0]} ${args[1]} failed (${code})`)),
+        : reject(Error(`${args[0]} ${args[0] === "git" ? args.find(a => ["clone", "fetch", "merge", "add", "commit", "push", "checkout", "status", "diff", "config", "check-ref-format"].includes(a)) ?? "operation" : args[1]} failed (${code})${
+          /non-fast-forward|fetch first/i.test(stderr) ? ": remote branch advanced; reconcile its head and retry without force-pushing" :
+          /workflow.*permission|workflows.*permission/i.test(stderr) ? ": GitHub rejected a workflow update; the App installation needs workflows write permission" :
+          /permission denied.*index\.lock|index\.lock.*permission denied/i.test(stderr) ? ": Git cannot write its index" :
+          /CONFLICT|unmerged files/i.test(stderr) ? ": merge conflicts need resolution in the saved workspace" : ""
+        }`)),
     );
   });
 }
@@ -134,7 +140,7 @@ export class Workspaces {
     );
     return dir;
   }
-  async refresh(number: number, branch: string) {
+  async refresh(number: number, branch: string, requireMerge = false) {
     const dir = this.path(number);
     await command(["git", "check-ref-format", "refs/heads/" + branch], dir);
     await this.authenticated(
@@ -161,8 +167,17 @@ export class Workspaces {
         ],
         dir,
       );
-    } catch {
-      /* Leave merge conflicts for Codex to inspect and resolve. */
+    } catch (error) {
+      await this.ownFiles(dir);
+      if (requireMerge) {
+        const conflicts = await command([
+          "git", "-c", `safe.directory=${dir}`, "diff", "--name-only", "--diff-filter=U",
+        ], dir);
+        if (conflicts)
+          throw Error("Publication paused: the PR head has merge conflicts in the saved workspace. Inspect git status, resolve the conflicting files, run checks, and call github_publish again. Local commits and remote history are preserved.");
+        throw error;
+      }
+      // Initial refresh may encounter uncommitted work; leave it for the agent.
     }
     await this.ownFiles(dir);
   }
@@ -202,7 +217,7 @@ export class Workspaces {
         )),
     );
   }
-  async publish(number: number, branch: string, base: string, jobId: string) {
+  async publish(number: number, branch: string, base: string, jobId: string, reconcile = false) {
     if (branch === base || branch === "main" || branch.startsWith("-"))
       throw Error("Unsafe publishing branch");
     const dir = this.path(number);
@@ -220,6 +235,9 @@ export class Workspaces {
         ],
         dir,
       );
+    // Save local edits first: refreshing a dirty workspace can abort before merging
+    // an updated PR head, leaving the later push permanently non-fast-forward.
+    if (reconcile) await this.refresh(number, branch, true);
     // Explicit refspec, no force, no repository hooks, no credential helper.
     await this.authenticated(
       [
