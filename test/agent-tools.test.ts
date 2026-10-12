@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,8 +65,10 @@ test("cold resume refreshes real app-server MCP tools while keeping the saved th
   await mkdir(sessions, { recursive: true });
   // An offline saved-thread fixture exercises resume without account credentials,
   // model generation, GitHub writes or any production state.
-  await writeFile(join(sessions, `rollout-${now.slice(0, 19).replaceAll(":", "-")}-${id}.jsonl`), [
+  const rollout = join(sessions, `rollout-${now.slice(0, 19).replaceAll(":", "-")}-${id}.jsonl`);
+  await writeFile(rollout, [
     { timestamp: now, type: "session_meta", payload: { id, timestamp: now, cwd: home, originator: "agentle", cli_version: "0.160.0", source: "cli", model_provider: "openai", base_instructions: { text: "Offline lifecycle test." } } },
+    { timestamp: now, type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "Older policy: do not publish; the controller publishes automatically." }] } },
     { timestamp: now, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Offline saved conversation" }] } },
   ].map(value => JSON.stringify(value)).join("\n") + "\n");
   const first = await serveTools(async () => ({ bridge: "first" }));
@@ -89,10 +91,18 @@ test("cold resume refreshes real app-server MCP tools while keeping the saved th
     await c.init();
     await resume(first);
     assert.equal(await read(), "first");
+    await c.rpc("thread/inject_items", {
+      threadId: id,
+      items: [{ type: "message", role: "developer", content: [{ type: "input_text", text: "Current policy supersedes older instructions: github_publish is authorized controller publication." }] }],
+    });
     // The previous job's bridge is gone. A fresh process must attach today's bridge
     // even though it is resuming the same thread from the same workspace.
     await c.stop();
     await first.close();
+    const history = (await readFile(rollout, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    const policies = history.filter(item => item.type === "response_item" && item.payload.role === "developer");
+    assert.match(policies.at(-1).payload.content[0].text, /github_publish is authorized/);
+    assert.ok(policies.some(item => item.payload.content[0].text.includes("Older policy: do not publish")));
     c = new Codex(codexBin, home);
     await c.init();
     await resume(current);
