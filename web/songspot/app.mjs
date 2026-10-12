@@ -147,9 +147,9 @@ $('start').onclick = async () => {
 function updateTimeline() {
   if (!round) return;
   const elapsed = Math.min(round.seconds, Math.max(0, audio.currentTime || 0));
-  $('segment-progress').max = round.seconds;
+  $('segment-progress').max = lengths.at(-1);
   $('segment-progress').value = elapsed;
-  $('segment-time').textContent = `${elapsed.toFixed(1)}s / ${round.seconds}s`;
+  $('segment-time').textContent = `${elapsed.toFixed(1)}s / ${lengths.at(-1)}s`;
 }
 let timelineFrame;
 function animateTimeline() {
@@ -163,7 +163,14 @@ function render() {
   $('round-number').textContent = `ROUND ${count}`;
   $('score').textContent = `${wins} guessed · ${points} points`;
   $('duration').textContent = `${round.seconds} seconds · replay as often as you like`;
-  $('steps').replaceChildren(...lengths.map((seconds, index) => { const li = document.createElement('li'); li.textContent = `${seconds}s`; if (index === round.step) li.className = 'active'; return li; }));
+  $('steps').replaceChildren(...lengths.map((seconds, index) => {
+    const li = document.createElement('li');
+    li.style.left = `${seconds / lengths.at(-1) * 100}%`;
+    const label = document.createElement('span'); label.textContent = `${seconds}s`; li.append(label);
+    if (index <= round.step) li.className = 'unlocked';
+    if (index === round.step) { li.className += ' active'; li.setAttribute('aria-current', 'step'); }
+    return li;
+  }));
   $('guess-form').hidden = $('skip').hidden = round.done;
   $('next').hidden = $('answer').hidden = !round.done;
   $('skip').textContent = round.step === 3 ? 'Reveal song' : 'Skip → hear more';

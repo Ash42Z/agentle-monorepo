@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 const game = await import(pathToFileURL(`${process.cwd()}/web/songspot/game.mjs`).href);
 const presets = await import(pathToFileURL(`${process.cwd()}/web/songspot/presets.mjs`).href);
 class Element {
+  style = { left: '' }; className = '';
   children: Element[] = []; dataset: Record<string, string> = {}; textContent = ''; value: string | number = ''; max = 0; disabled = false;
   hidden = false; checked = false; open = false; onclick?: () => unknown; onchange?: () => unknown; onsubmit?: (event: any) => unknown;
   append(...items: Element[]) { this.children.push(...items); }
@@ -97,24 +98,31 @@ test('storage write failures keep current album choices playable', async () => {
 test('timeline follows playback and skip extends it without restarting; replay and next reset', async () => {
   const app = setup({ getItem: () => null, setItem() {} }); await choose(app);
   await app.element('start').onclick!();
-  assert.equal(app.element('segment-time').textContent, '0.0s / 0.5s');
+  assert.equal(app.element('segment-time').textContent, '0.0s / 15s');
+  assert.equal(app.element('segment-progress').max, 15);
+  assert.deepEqual(app.element('steps').children.map(marker => marker.children[0].textContent), ['0.5s', '2s', '8s', '15s']);
+  assert.deepEqual(app.element('steps').children.map(marker => Number.parseFloat(marker.style.left)), game.lengths.map((seconds: number) => seconds / 15 * 100));
+  assert.equal(app.element('steps').children[0].className, 'unlocked active');
   app.element('play').onclick!(); await settle();
   app.audio.currentTime = .3; app.events.get('timeupdate')!();
   assert.equal(app.element('segment-progress').value, .3);
-  assert.equal(app.element('segment-time').textContent, '0.3s / 0.5s');
+  assert.equal(app.element('segment-time').textContent, '0.3s / 15s');
   const pauses = app.audio.pauses;
   app.element('skip').onclick!(); await settle();
   assert.equal(app.audio.currentTime, .3); assert.equal(app.audio.plays, 1); assert.equal(app.audio.pauses, pauses);
-  assert.equal(app.element('segment-progress').max, 2);
-  assert.equal(app.element('segment-time').textContent, '0.3s / 2s');
-  app.audio.currentTime = 2; app.events.get('timeupdate')!();
+  assert.equal(app.element('segment-progress').max, 15);
+  assert.equal(app.element('segment-time').textContent, '0.3s / 15s');
+  app.audio.currentTime = 2.1; app.events.get('timeupdate')!();
+  assert.equal(app.element('segment-progress').value, 2);
+  assert.equal(app.element('segment-progress').max, 15);
+  assert.equal(app.element('steps').children[1].className, 'unlocked active');
   assert.equal(app.audio.paused, true);
   app.element('skip').onclick!(); await settle();
-  assert.equal(app.audio.currentTime, 2); assert.equal(app.audio.plays, 2);
+  assert.equal(app.audio.currentTime, 2.1); assert.equal(app.audio.plays, 2);
   app.element('play').onclick!(); await settle();
-  assert.equal(app.audio.currentTime, 0); assert.equal(app.element('segment-time').textContent, '0.0s / 8s');
+  assert.equal(app.audio.currentTime, 0); assert.equal(app.element('segment-time').textContent, '0.0s / 15s');
   app.audio.currentTime = 3;
   app.element('next').onclick!();
   assert.equal(app.element('segment-progress').value, 0);
-  assert.equal(app.element('segment-time').textContent, '0.0s / 0.5s');
+  assert.equal(app.element('segment-time').textContent, '0.0s / 15s');
 });
