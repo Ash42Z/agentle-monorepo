@@ -45,7 +45,8 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
         state.update(job.id, { state: "done" });
         return;
       }
-      const branch = `agentle/${job.number}-${job.id}`;
+      // Comment job IDs include ISO timestamps; ':' is invalid in Git refs.
+      const branch = `agentle/${job.number}-${job.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
       await work.continueFromBase(job.number, branch, base);
       conversation = { branch, pr: null, thread: conversation.thread };
       state.saveConversation(job.number, branch, null, conversation.thread);

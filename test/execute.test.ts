@@ -2,13 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { State } from "../src/state.js";
 import { execute } from "../src/execute.js";
+import { command } from "../src/workspace.js";
 
-function fixture({ merged = false, closedIssue = false, changed = true } = {}) {
+function fixture({ merged = false, closedIssue = false, changed = true, jobId = "comment-2" } = {}) {
   const state = new State(":memory:");
   state.saveConversation(1, "agentle/1", 10, "saved-thread");
   state.enqueue("old", 1, "original");
   state.update("old", { state: "done", pr: 10 });
-  state.enqueue("comment-2", 1, "followup", merged ? 1 : 10);
+  state.enqueue(jobId, 1, "followup", merged ? 1 : 10);
   const comments: [number, string, string][] = [];
   const branches: string[] = [];
   const resumed: string[] = [];
@@ -76,6 +77,26 @@ test("a merged PR followup with no file changes replies without creating a PR", 
     await execute(f.state.next()!, f.context);
     assert.equal(f.state.conversation(1)?.pr, null);
     assert.deepEqual(f.comments.map(c => c[0]), [1, 1]);
+  } finally { f.state.db.close(); }
+});
+
+test("timestamped issue replies after merge use valid Git refs and retain their thread", async () => {
+  const jobId = "comment-6109895430-2026-10-11T14:10:36Z";
+  const f = fixture({ merged: true, closedIssue: true, jobId });
+  const continueFromBase = f.context.work.continueFromBase;
+  f.context.work.continueFromBase = async (number, branch, base) => {
+    await command(["git", "check-ref-format", `refs/heads/${branch}`], process.cwd());
+    await continueFromBase(number, branch, base);
+  };
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.branches, ["agentle/1-comment-6109895430-2026-10-11T14-10-36Z:main"]);
+    assert.deepEqual(f.resumed, ["saved-thread"]);
+    assert.equal(f.state.conversation(1)?.thread, "saved-thread");
+    assert.equal(f.state.conversation(1)?.pr, 11);
+    assert.equal(f.state.next(), undefined);
+    assert.deepEqual(f.comments.map(c => c[0]), [1, 11, 1]);
+    assert.ok(f.comments.every(c => c[1].startsWith(jobId)));
   } finally { f.state.db.close(); }
 });
 
