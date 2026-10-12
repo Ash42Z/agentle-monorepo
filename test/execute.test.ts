@@ -13,6 +13,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
   let config: any, prompt = "", created = false;
   const connections: boolean[] = [];
   const instructions: string[] = [];
+  const injections: any[] = [];
   let run: (call: (name: string, args: any) => Promise<any>) => Promise<string> = async () => "Verified.";
   const context = {
     state, cfg: { repository: "Ash42Z/agentle-monorepo", allowedUser: "Ash42Z" },
@@ -41,10 +42,12 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       connections.push(fresh);
       return {
         async rpc(method: string, params?: any) {
+          if (method === "thread/inject_items") injections.push(params);
           if (method === "thread/resume") { resumes.push(params.threadId); instructions.push(params.developerInstructions); config = params.config["mcp_servers.agentle_github"]; }
           return {};
         },
         async run(_thread: string, text: string) {
+          assert.equal(injections.at(-1)?.threadId, _thread);
           prompt = text;
           return run(async (name, args) => {
             const response = await fetch(config.env.AGENTLE_TOOL_ENDPOINT, {
@@ -57,7 +60,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       };
     },
   };
-  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
+  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, injections, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
 }
 
 test("issue replies stay on issue even with an associated PR; no automatic publication", async () => {
@@ -305,4 +308,42 @@ test("new PR publication needs metadata and does not push when it is missing", a
     return "Metadata needed.";
   });
   try { await execute(f.state.next()!, f.context); } finally { f.state.db.close(); }
+});
+
+
+test("resumed conversations receive current controller-tool authorization in developer history", async () => {
+  const f = fixture();
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.equal(f.injections.length, 1);
+    const injection = f.injections[0];
+    assert.equal(injection.threadId, "saved-thread");
+    assert.equal(injection.items[0].role, "developer");
+    const policy = injection.items[0].content[0].text;
+    assert.match(policy, /supersedes older publication instructions/);
+    assert.match(policy, /authorized to invoke.*github_publish/);
+    assert.match(policy, /This tool is the controller/);
+    assert.match(policy, /Never merge, push to the default branch, access controller credentials/);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+  } finally { f.state.db.close(); }
+});
+
+test("failed policy injection preserves the saved thread and never starts an unauthorized turn", async () => {
+  const f = fixture();
+  const connect = f.context.connect;
+  f.context.connect = async (fresh = false) => {
+    const c = await connect(fresh), rpc = c.rpc;
+    c.rpc = async (method, params) => {
+      if (method === "thread/inject_items") throw Error("Policy injection unavailable");
+      return rpc(method, params);
+    };
+    return c;
+  };
+  f.setRun(async () => { assert.fail("Should not start generation without current policy"); });
+  try {
+    await assert.rejects(execute(f.state.next()!, f.context), /Policy injection unavailable/);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+    assert.equal(f.state.conversation(19)?.branch, "agentle/19");
+    assert.deepEqual(f.publications, []);
+  } finally { f.state.db.close(); }
 });

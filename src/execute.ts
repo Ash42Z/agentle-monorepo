@@ -158,6 +158,17 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
         conversation.pr,
         thread,
       );
+      // Resume preserves historical developer messages. Reassert today's policy
+      // in model-visible history instead of relying on config overrides alone.
+      await c.rpc("thread/inject_items", {
+        threadId: thread,
+        items: [{
+          type: "message", role: "developer",
+          content: [{ type: "input_text", text:
+            "Current Agentle publication policy supersedes older publication instructions in this saved conversation. You are authorized to invoke the agentle_github github_publish tool for the user's requested work. This tool is the controller: it commits and pushes your workspace and creates or updates the PR synchronously. Publication through this tool satisfies the requirement to publish only through the controller. Do not wait for automatic publication after your turn, ask the user for separate publication permission, or treat a local git commit/index permission error as a blocker to this tool. The agent chooses whether to update an existing open PR or create a new draft PR. Direct git add, commit, and push are reserved for the controller; keep using local files and read-only git commands for implementation and inspection. Never merge, push to the default branch, access controller credentials, or spawn subagents. Finish requested implementation by using github_publish and verifying its returned PR, or report the actual tool error. Discussion-only requests do not require publication.",
+          }],
+        }],
+      });
       const result = await c.run(
         thread!,
         `Repository ${cfg.repository}; request from ${cfg.allowedUser}. Source issue/PR #${job.source ?? job.number}; workspace conversation #${job.number}; associated PR ${conversation.pr ? "#" + conversation.pr : "none"}.\n${job.prompt}\n\nIf resuming after interruption, inspect existing work before continuing.`,
