@@ -29,7 +29,13 @@ let draining = state.get("activatedRelease") !== release,
   lastError: string | null = null;
 let activeJobId: string | null = null;
 let codex: Codex | null = null;
-async function connect() {
+async function connect(fresh = false) {
+  if (fresh && codex) {
+    const previous = codex;
+    codex = null;
+    authReady = false;
+    await previous.stop();
+  }
   if (codex) return codex;
   const c = new Codex(
     process.env.CODEX_BIN ?? "codex",
@@ -37,8 +43,10 @@ async function connect() {
     process.getuid?.() === 0 ? 10001 : undefined,
   );
   c.on("stopped", () => {
-    if (codex === c) codex = null;
-    authReady = false;
+    if (codex === c) {
+      codex = null;
+      authReady = false;
+    }
   });
   try {
     await c.init();

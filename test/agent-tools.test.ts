@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Codex } from "../src/codex.js";
 import { createInterface } from "node:readline";
 import { githubTools, serveTools } from "../src/agent-tools.js";
 
@@ -47,4 +52,55 @@ test("bridge rejects unauthorized access and serializes actions", async () => {
     }).then(response => response.json())));
     assert.equal(maxActive, 1);
   } finally { await bridge.close(); }
+});
+
+
+const codexBin = process.env.CODEX_BIN ?? "codex";
+test("cold resume refreshes real app-server MCP tools while keeping the saved thread", {
+  skip: spawnSync(codexBin, ["--version"], { stdio: "ignore" }).status !== 0,
+}, async () => {
+  const home = await mkdtemp(join(tmpdir(), "agentle-offline-resume-"));
+  const id = randomUUID(), now = new Date().toISOString();
+  const sessions = join(home, "sessions", now.slice(0, 4), now.slice(5, 7), now.slice(8, 10));
+  await mkdir(sessions, { recursive: true });
+  // An offline saved-thread fixture exercises resume without account credentials,
+  // model generation, GitHub writes or any production state.
+  await writeFile(join(sessions, `rollout-${now.slice(0, 19).replaceAll(":", "-")}-${id}.jsonl`), [
+    { timestamp: now, type: "session_meta", payload: { id, timestamp: now, cwd: home, originator: "agentle", cli_version: "0.160.0", source: "cli", model_provider: "openai", base_instructions: { text: "Offline lifecycle test." } } },
+    { timestamp: now, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Offline saved conversation" }] } },
+  ].map(value => JSON.stringify(value)).join("\n") + "\n");
+  const first = await serveTools(async () => ({ bridge: "first" }));
+  const current = await serveTools(async () => ({ bridge: "current" }));
+  let c = new Codex(codexBin, home);
+  const resume = async (bridge: typeof first) => {
+    const result = await c.rpc("thread/resume", {
+      threadId: id, cwd: home, approvalPolicy: "never", sandbox: "danger-full-access",
+      developerInstructions: "Use current GitHub tools.", config: bridge.config,
+    });
+    assert.equal(result.thread.id, id);
+  };
+  const read = async () => {
+    const result = await c.rpc("mcpServer/tool/call", {
+      threadId: id, server: "agentle_github", tool: "github_read", arguments: { path: "/issues/1" },
+    });
+    return JSON.parse(result.content[0].text).bridge;
+  };
+  try {
+    await c.init();
+    await resume(first);
+    assert.equal(await read(), "first");
+    // The previous job's bridge is gone. A fresh process must attach today's bridge
+    // even though it is resuming the same thread from the same workspace.
+    await c.stop();
+    await first.close();
+    c = new Codex(codexBin, home);
+    await c.init();
+    await resume(current);
+    assert.equal(await read(), "current");
+  } finally {
+    await c.stop();
+    await first.close();
+    await current.close();
+    await rm(home, { recursive: true, force: true });
+  }
 });
