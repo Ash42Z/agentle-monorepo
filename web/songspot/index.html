@@ -14,9 +14,14 @@
 <p class="intro">Start with half a second. Guess the song, or unlock a little more.<br>Pick the artists you love and put your ears to the test.</p>
 <form id="artist-search"><label for="artist-query">Find an artist</label><div class="input-row"><input id="artist-query" required maxlength="100" placeholder="Search any artist…" autocomplete="off"><button>Search</button></div></form>
 <div id="search-results" class="results"></div>
-<div id="selected" class="chips" aria-label="Selected artists"></div>
-<label class="album-filter"><input type="checkbox" id="studio-only" checked> Studio albums only</label>
-<p class="hint">Excludes singles, EPs and releases labelled live, compilation or remix. Deezer metadata may not identify every non-studio release.</p>
+<h2>Your albums &amp; EPs</h2>
+<p class="hint">Open each artist to add or remove releases. Standard albums and EPs are recommended automatically. Save an artist preset to reuse your choices.</p>
+<div id="selected" aria-label="Selected artists and albums"></div>
+<details class="album-panel"><summary>Saved artist playlists</summary>
+<p class="hint">Playlists remember artists. Artist presets remember their album choices. Saves stay in this browser on this device.</p>
+<div id="playlist-list"></div>
+<form id="playlist-form"><label for="playlist-name">Save current artists as a playlist</label><div class="input-row"><input id="playlist-name" required maxlength="100" placeholder="Playlist name"><button id="save-playlist">Save playlist</button></div></form>
+</details>
 <button id="start" disabled>Let's play →</button>
 <p class="hint">Choose as many artists as you like. Songs come from their available Deezer previews.</p>
 </section>

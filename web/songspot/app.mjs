@@ -1,6 +1,8 @@
-import { Round, ClipPlayer, lengths, playableTracks, studioAlbum, studioTrack, catalog } from './game.mjs';
+import { defaultAlbums, readLibrary, writeLibrary } from './presets.mjs';
+import { Round, ClipPlayer, lengths, playableTracks, catalog } from './game.mjs';
 const $ = id => document.getElementById(id);
-const selected = new Map(), cache = new Map();
+const selected = new Map(), cache = new Map(), albumStates = new Map();
+let busy = false, library = { version: 1, artists: {}, playlists: [] }, storageReady = true;
 let tracks = [], deck = [], round, count = 0, wins = 0, points = 0, searchVersion = 0;
 const audio = new Audio(), player = new ClipPlayer(audio);
 audio.preload = 'none';
@@ -12,15 +14,88 @@ async function api(path) {
   if (result.error || !Array.isArray(result.data)) throw Error('Deezer could not return songs. Please try again shortly.');
   return result;
 }
-function artistChips() {
-  $('selected').replaceChildren(...Array.from(selected.values(), artist => {
-    const button = document.createElement('button'); button.textContent = `${artist.name} (ID ${artist.id}) ×`;
-    button.setAttribute('aria-label', `Remove ${artist.name}`);
-    button.onclick = () => { selected.delete(artist.id); artistChips(); };
-    return button;
-  }));
-  $('start').disabled = !selected.size;
+try { library = readLibrary(localStorage); }
+catch { storageReady = false; status('Saved presets could not be read. You can still choose albums and play.'); }
+function saveLibrary(next) {
+  if (!storageReady) { status('Browser storage is unavailable; presets could not be saved.'); return false; }
+  try { writeLibrary(localStorage, next); library = next; return true; }
+  catch { status('Could not save. Browser storage may be disabled or full. Your current selection is still available.'); return false; }
 }
+function button(text, action) {
+  const element = document.createElement('button'); element.type = 'button'; element.className = 'secondary'; element.textContent = text; element.onclick = action; element.disabled = busy; return element;
+}
+function artistChips() {
+  const open = new Set([...$('selected').children].filter(panel => panel.open).map(panel => panel.dataset.artist));
+  $('selected').replaceChildren(...Array.from(selected.values(), artist => {
+    const panel = document.createElement('details'); panel.className = 'album-panel'; panel.dataset.artist = String(artist.id); panel.open = open.has(String(artist.id));
+    const state = albumStates.get(artist.id);
+    const summary = document.createElement('summary');
+    summary.textContent = `${artist.name} · ${state?.albums ? `${state.ids.size} releases selected` : state?.error ? 'Could not load releases' : 'Loading releases…'}`;
+    panel.append(summary);
+    panel.append(button('Remove artist', () => { selected.delete(artist.id); artistChips(); }));
+    if (state?.error) panel.append(button('Retry', () => { albumStates.delete(artist.id); void loadAlbums(artist); }));
+    if (state?.albums) {
+      panel.append(button('Recommended', () => { state.ids = defaultAlbums(state.albums); artistChips(); }),
+        button('Select all', () => { state.ids = new Set(state.albums.map(a => a.id)); artistChips(); }),
+        button('Clear', () => { state.ids.clear(); artistChips(); }),
+        button('Save artist preset', () => {
+          if (saveLibrary({ ...library, artists: { ...library.artists, [artist.id]: [...state.ids] } })) status(`Album preset saved for ${artist.name}.`);
+        }));
+      if (Object.hasOwn(library.artists, artist.id)) panel.append(button('Forget saved preset', () => {
+        const artists = { ...library.artists }; delete artists[artist.id];
+        if (saveLibrary({ ...library, artists })) { status(`Saved preset removed for ${artist.name}.`); artistChips(); }
+      }));
+      const list = document.createElement('div'); list.className = 'album-list';
+      for (const album of state.albums) {
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = state.ids.has(album.id); checkbox.disabled = busy;
+        checkbox.onchange = () => { if (checkbox.checked) state.ids.add(album.id); else state.ids.delete(album.id); summary.textContent = `${artist.name} · ${state.ids.size} releases selected`; updateStart(); };
+        const text = document.createElement('span'); text.textContent = `${album.title} · ${album.release_date || 'Unknown date'} · ${album.record_type || 'Release'}`;
+        label.append(checkbox);
+        if (/^https:\/\//.test(album.cover_medium || '')) { const cover = document.createElement('img'); cover.src = album.cover_medium; cover.alt = ''; cover.loading = 'lazy'; label.append(cover); }
+        label.append(text); list.append(label);
+      }
+      panel.append(list);
+      const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = 'Recommended releases are a best effort. Expanded editions and labelled live/compilation releases start unchecked. You can include any release.'; panel.append(hint);
+    }
+    return panel;
+  }));
+  updateStart();
+}
+function updateStart() {
+  $('start').disabled = busy || !selected.size || [...selected.keys()].some(id => !albumStates.get(id)?.albums) || ![...selected.keys()].some(id => albumStates.get(id)?.ids.size);
+}
+async function loadAlbums(artist) {
+  if (albumStates.has(artist.id)) { artistChips(); return; }
+  const state = { ids: new Set() }; albumStates.set(artist.id, state); artistChips();
+  try {
+    state.albums = (await catalog(api, `artists/${artist.id}/albums`)).filter(a => Number.isSafeInteger(a.id) && a.id > 0 && typeof a.title === 'string');
+    state.ids = Object.hasOwn(library.artists, artist.id) ? new Set(library.artists[artist.id].filter(id => state.albums.some(a => a.id === id))) : defaultAlbums(state.albums);
+  } catch (error) { state.error = true; status(error.message); }
+  artistChips();
+}
+function renderPlaylists() {
+  $('playlist-list').replaceChildren(...library.playlists.map(playlist => {
+    const row = document.createElement('div'); row.className = 'playlist-row';
+    row.append(button(`${playlist.name} · ${playlist.artists.length} artists — Load`, () => {
+      selected.clear();
+      for (const artist of playlist.artists) { selected.set(artist.id, artist); }
+      artistChips(); for (const artist of selected.values()) void loadAlbums(artist);
+      status(`Loaded ${playlist.name}. Album choices use your artist presets or current choices.`);
+    }), button('Delete', () => {
+      if (saveLibrary({ ...library, playlists: library.playlists.filter(p => p.name !== playlist.name) })) renderPlaylists();
+    })); return row;
+  }));
+  $('save-playlist').disabled = busy;
+}
+$('playlist-form').onsubmit = event => {
+  event.preventDefault(); const name = $('playlist-name').value.trim();
+  if (!name || !selected.size) { status('Choose artists and enter a playlist name first.'); return; }
+  if (library.playlists.some(p => p.name === name)) { status('That playlist name already exists. Use a different name or delete the old playlist.'); return; }
+  const playlist = { name, artists: [...selected.values()].map(({ id, name }) => ({ id, name })) };
+  if (saveLibrary({ ...library, playlists: [...library.playlists, playlist] })) { renderPlaylists(); status(`Saved ${name}. Save artist presets separately to remember album choices.`); }
+};
+renderPlaylists();
 $('artist-search').onsubmit = async event => {
   event.preventDefault(); const version = ++searchVersion;
   const query = $('artist-query').value.trim(); if (!query) return;
@@ -40,36 +115,25 @@ $('artist-search').onsubmit = async event => {
       const profile = document.createElement('a'); profile.href = `https://www.deezer.com/artist/${artist.id}`; profile.target = '_blank'; profile.rel = 'noopener noreferrer'; profile.textContent = 'View artist ↗';
       card.append(button, profile);
       button.onclick = () => {
-        selected.set(artist.id, artist); artistChips(); status(`${artist.name} selected.`);
+        if (busy) return; selected.set(artist.id, artist); void loadAlbums(artist); status(`${artist.name} selected.`);
       }; return card;
     }));
     status(artists.length ? 'Choose an artist from the results.' : 'No artists found. Try another name.');
   } catch (error) { if (version === searchVersion) status(error.message); }
 };
 $('start').onclick = async () => {
-  $('start').disabled = true; status('Finding playable songs…');
+  if (busy || $('start').disabled) return;
+  busy = true; artistChips(); renderPlaylists(); status('Finding playable songs…');
   const artists = [...selected.values()];
   try {
-    const studioOnly = $('studio-only').checked;
     const results = [];
-    // Load sequentially so larger selections do not flood the music API.
-    for (const artist of artists) {
-      const key = `${artist.id}:${studioOnly}`;
-      if (!cache.has(key)) {
-        let songs;
-        if (studioOnly) {
-          const albums = await catalog(api, `artists/${artist.id}/albums`);
-          songs = [];
-          for (const album of albums.filter(studioAlbum)) {
-            const albumTracks = await catalog(api, `albums/${album.id}/tracks`);
-            songs.push(...albumTracks.filter(studioTrack).filter(track => track.artist?.id === artist.id));
-          }
-        } else {
-          songs = await catalog(api, `artists/${artist.id}/tracks`);
-        }
-        cache.set(key, songs);
+    // Snapshot choices and load sequentially to avoid flooding Deezer.
+    const choices = artists.map(artist => ({ artist, ids: [...albumStates.get(artist.id).ids] }));
+    for (const { artist, ids } of choices) {
+      for (const id of ids) {
+        if (!cache.has(id)) cache.set(id, await catalog(api, `albums/${id}/tracks`));
+        results.push(cache.get(id).filter(track => track.artist?.id === artist.id));
       }
-      results.push(cache.get(key));
     }
     tracks = playableTracks(results.flat());
     if (!tracks.length) throw Error('No playable previews for these artists. Please choose another artist.');
@@ -78,7 +142,7 @@ $('start').onclick = async () => {
     $('songs').replaceChildren(...tracks.map(track => { const option = document.createElement('option'); option.value = track.title; option.label = track.artist.name; return option; }));
     nextRound();
   } catch (error) { status(error.message); }
-  finally { artistChips(); }
+  finally { busy = false; artistChips(); renderPlaylists(); }
 };
 function render() {
   $('round-number').textContent = `ROUND ${count}`;
