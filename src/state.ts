@@ -30,7 +30,10 @@ export class State {
         try {
           chmodSync(path + suffix, 0o600);
         } catch {}
-    this.db.exec("UPDATE jobs SET state='queued' WHERE state='running'");
+    this.db.exec(`CREATE TABLE IF NOT EXISTS conversation_prs(pr INTEGER PRIMARY KEY,number INTEGER NOT NULL);
+      INSERT OR IGNORE INTO conversation_prs SELECT pr,number FROM conversations WHERE pr IS NOT NULL;
+      INSERT OR IGNORE INTO conversation_prs SELECT pr,number FROM jobs WHERE pr IS NOT NULL;
+      UPDATE jobs SET state='queued' WHERE state='running';`);
   }
   get(key: string) {
     return (
@@ -82,8 +85,9 @@ export class State {
       .run(...keys.map((k) => (fields as any)[k]), id);
   }
   originNumber(number: number) {
-    return (this.db.prepare(`SELECT number FROM conversations WHERE pr=?
-      UNION ALL SELECT number FROM jobs WHERE pr=? LIMIT 1`).get(number, number) as
+    return (this.db.prepare(`SELECT number FROM conversation_prs WHERE pr=?
+      UNION ALL SELECT number FROM conversations WHERE pr=?
+      UNION ALL SELECT number FROM jobs WHERE pr=? LIMIT 1`).get(number, number, number) as
       { number: number } | undefined)?.number ?? number;
   }
   conversation(number: number) {
@@ -99,6 +103,13 @@ export class State {
     pr: number | null,
     thread: string | null,
   ) {
+    // Keep every PR associated during a multi-action turn routable after switching.
+    const previous = this.conversation(number)?.pr;
+    for (const associated of [previous, pr])
+      if (associated != null)
+        this.db.prepare(`INSERT OR IGNORE INTO conversation_prs(pr,number) VALUES(?,
+          COALESCE((SELECT number FROM conversations WHERE pr=? LIMIT 1),
+            (SELECT number FROM jobs WHERE pr=? LIMIT 1),?))`).run(associated, associated, associated, number);
     this.db
       .prepare(
         "INSERT INTO conversations VALUES(?,?,?,?) ON CONFLICT(number) DO UPDATE SET branch=excluded.branch,pr=excluded.pr,thread=excluded.thread",

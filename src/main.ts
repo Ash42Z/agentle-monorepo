@@ -156,7 +156,7 @@ async function tick() {
     }
     try {
       await gh.comment(
-        job.number,
+        job.source ?? job.number,
         job.id + "-" + kind,
         lastError + ". Existing work is preserved.",
       );
