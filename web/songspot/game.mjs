@@ -40,13 +40,18 @@ export class ClipPlayer {
 }
 
 // Deezer marks singles/EPs separately, but live and compilation albums need title checks.
-const nonStudio = /\b(live|remix(?:es|ed)?|compilation|greatest hits|best of|collection|anthology|karaoke|tribute|soundtrack|in concert|concert|unplugged)\b/i;
+const nonStudio = /\b(live|remix(?:es|ed)?|compilation|greatest hits|best of|collection|anthology|karaoke|tribute|soundtrack|in concert|concert|unplugged|b[ -]?sides?|rarities|outtakes?)\b/i;
 export function studioAlbum(album) {
   return album.record_type === 'album' && !nonStudio.test(album.title || '');
 }
 export function studioTrack(track) {
   const qualifiers = (track.title || '').match(/\([^)]*\)|\[[^\]]*\]|\s[-–]\s.*/g) || [];
-  return !nonStudio.test([track.title_version || '', ...qualifiers].join(' '));
+  const versions = [track.title_version || '', ...qualifiers].join(' ');
+  return !nonStudio.test(versions) && !/\b(demo|rough mix)\b/i.test(versions);
+}
+// Filtering never mutates artist presets, including explicitly empty selections.
+export function selectedReleases(albums, ids, studioOnly) {
+  return albums.filter(album => ids.has(album.id) && (!studioOnly || studioAlbum(album))).map(album => album.id);
 }
 export async function catalog(api, path) {
   const items = [];

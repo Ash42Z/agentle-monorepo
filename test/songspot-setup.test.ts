@@ -29,7 +29,10 @@ function setup(storage: any, failCatalog = false) {
     fetch: async (path: string) => {
       paths.push(path);
       if (path.includes('/albums') && failCatalog) throw Error('Catalog failed');
-      const data = path.startsWith('api/artists?q=') ? [artist] : path.startsWith('api/artists/') ? releases : [{ id: Number(path.match(/albums\/(\d+)/)?.[1]), title: `Track from ${path}`, artist, preview: 'https://example.com/audio' }];
+      const data = path.startsWith('api/artists?q=') ? [artist] : path.startsWith('api/artists/') ? releases : [
+        { id: Number(path.match(/albums\/(\d+)/)?.[1]), title: `Track from ${path}`, artist, preview: 'https://example.com/audio' },
+        { id: 99, title: 'Song (Live)', artist, preview: 'https://example.com/live' },
+      ];
       return { ok: true, json: async () => ({ data }) };
     }
   });
@@ -82,4 +85,28 @@ test('storage write failures keep current album choices playable', async () => {
   await app.element('start').onclick!();
   assert.equal(app.element('game').hidden, false);
   assert.equal(app.paths.some(path => path.includes('albums/20/tracks')), false);
+});
+test('studio-only setup skips EP requests and live bonus tracks while retaining the preset', async () => {
+  const raw = JSON.stringify({ version: 1, artists: { '412': [10, 30] }, playlists: [] });
+  const app = setup({ getItem: () => raw, setItem() { throw Error('Presets must not change'); } });
+  await choose(app);
+  app.element('studio-only').checked = true; app.element('studio-only').onchange!();
+  assert.equal(app.element('start').disabled, false);
+  await app.element('start').onclick!();
+  assert.equal(app.element('game').hidden, false);
+  assert.equal(app.paths.some(path => path.includes('albums/30/tracks')), false);
+  assert.equal(app.element('songs').children.length, 1);
+  assert.equal(app.element('studio-only').disabled, false);
+  assert.equal(app.element('selected').children[0].children[0].textContent, 'Queen · 2 releases selected');
+});
+test('studio-only prevents an EP-only game and disabling the filter restores the selection', async () => {
+  const app = setup({ getItem: () => JSON.stringify({ version: 1, artists: { '412': [30] }, playlists: [] }), setItem() {} });
+  await choose(app);
+  app.element('studio-only').checked = true; app.element('studio-only').onchange!();
+  assert.equal(app.element('start').disabled, true);
+  app.element('studio-only').checked = false; app.element('studio-only').onchange!();
+  assert.equal(app.element('start').disabled, false);
+  await app.element('start').onclick!();
+  assert.ok(app.paths.some(path => path.includes('albums/30/tracks')));
+  assert.equal(app.element('songs').children.length, 2);
 });

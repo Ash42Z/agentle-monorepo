@@ -1,5 +1,5 @@
 import { defaultAlbums, readLibrary, writeLibrary } from './presets.mjs';
-import { Round, ClipPlayer, lengths, playableTracks, catalog } from './game.mjs';
+import { Round, ClipPlayer, lengths, playableTracks, catalog, selectedReleases, studioTrack } from './game.mjs';
 const $ = id => document.getElementById(id);
 const selected = new Map(), cache = new Map(), albumStates = new Map();
 let busy = false, library = { version: 1, artists: {}, playlists: [] }, storageReady = true;
@@ -63,8 +63,12 @@ function artistChips() {
   updateStart();
 }
 function updateStart() {
-  $('start').disabled = busy || !selected.size || [...selected.keys()].some(id => !albumStates.get(id)?.albums) || ![...selected.keys()].some(id => albumStates.get(id)?.ids.size);
+  $('start').disabled = busy || !selected.size || [...selected.keys()].some(id => !albumStates.get(id)?.albums) || ![...selected.keys()].some(id => {
+    const state = albumStates.get(id);
+    return state?.albums && selectedReleases(state.albums, state.ids, $('studio-only').checked).length;
+  });
 }
+$('studio-only').onchange = updateStart;
 async function loadAlbums(artist) {
   if (albumStates.has(artist.id)) { artistChips(); return; }
   const state = { ids: new Set() }; albumStates.set(artist.id, state); artistChips();
@@ -124,25 +128,30 @@ $('artist-search').onsubmit = async event => {
 $('start').onclick = async () => {
   if (busy || $('start').disabled) return;
   busy = true; artistChips(); renderPlaylists(); status('Finding playable songs…');
+  const studioOnly = $('studio-only').checked;
+  $('studio-only').disabled = true;
   const artists = [...selected.values()];
   try {
     const results = [];
     // Snapshot choices and load sequentially to avoid flooding Deezer.
-    const choices = artists.map(artist => ({ artist, ids: [...albumStates.get(artist.id).ids] }));
+    const choices = artists.map(artist => {
+      const state = albumStates.get(artist.id);
+      return { artist, ids: selectedReleases(state.albums, state.ids, studioOnly) };
+    });
     for (const { artist, ids } of choices) {
       for (const id of ids) {
         if (!cache.has(id)) cache.set(id, await catalog(api, `albums/${id}/tracks`));
-        results.push(cache.get(id).filter(track => track.artist?.id === artist.id));
+        results.push(cache.get(id).filter(track => track.artist?.id === artist.id && (!studioOnly || studioTrack(track))));
       }
     }
     tracks = playableTracks(results.flat());
-    if (!tracks.length) throw Error('No playable previews for these artists. Please choose another artist.');
+    if (!tracks.length) throw Error('No playable previews for these album choices. Choose other releases or turn off Studio albums only.');
     searchVersion++; $('setup').hidden = true; $('game').hidden = false;
     deck = []; count = wins = points = 0;
     $('songs').replaceChildren(...tracks.map(track => { const option = document.createElement('option'); option.value = track.title; option.label = track.artist.name; return option; }));
     nextRound();
   } catch (error) { status(error.message); }
-  finally { busy = false; artistChips(); renderPlaylists(); }
+  finally { busy = false; $('studio-only').disabled = false; artistChips(); renderPlaylists(); }
 };
 function render() {
   $('round-number').textContent = `ROUND ${count}`;

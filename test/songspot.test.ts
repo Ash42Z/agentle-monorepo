@@ -71,6 +71,24 @@ test('studio catalog excludes EPs, singles and labelled non-studio releases', ()
   assert.equal(game.studioTrack({ title: 'Song' }), true);
   assert.equal(game.studioTrack({ title: 'Live Forever' }), true);
   assert.equal(game.studioTrack({ title: 'Song - Live at Wembley' }), false);
+  assert.equal(game.studioTrack({ title: 'Song (Demo)' }), false);
+  assert.equal(game.studioTrack({ title: 'Song', title_version: 'Rough Mix' }), false);
+});
+test('studio mode filters selected releases without changing saved choices', () => {
+  const albums = [
+    { id: 1, record_type: 'album', title: 'A Night at the Opera' },
+    { id: 2, record_type: 'album', title: 'Live at Wembley' },
+    { id: 3, record_type: 'ep', title: 'Studio EP' },
+    { id: 4, record_type: 'album', title: 'Greatest Hits' },
+    { id: 5, record_type: 'album', title: 'Remixes' },
+    { id: 6, record_type: 'album', title: 'B-Sides' },
+    { id: 7, record_type: 'album', title: 'Unselected studio album' },
+  ];
+  const ids = new Set([1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(game.selectedReleases(albums, ids, true), [1]);
+  assert.deepEqual([...ids], [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(game.selectedReleases(albums, ids, false), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(game.selectedReleases(albums, new Set(), true), []);
 });
 test('catalog follows pagination using local routes and stops on empty pages', async () => {
   const paths: string[] = [];
