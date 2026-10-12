@@ -5,6 +5,14 @@
 # Add future service routes inside this block, before the fallback handle.
 agentle.cc {
 	encode zstd gzip
+	# Preview Songspot uses the same fixed public catalog routes as production.
+	@previewMusic path_regexp previewMusic ^/previews/pr-[1-9][0-9]*/songspot/api/(.*)$
+	rewrite @previewMusic /songspot/api/{re.previewMusic.1}
+	@previewRoot path_regexp previewRoot ^/previews/pr-[1-9][0-9]*$
+	redir @previewRoot {uri}/ 308
+	handle /previews/* {
+		reverse_proxy dashboard:8082
+	}
 	redir /songspot /songspot/ 308
 	handle /songspot/api/artists {
 		rewrite * /search/artist?{query}&limit=12
