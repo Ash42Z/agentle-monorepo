@@ -2,121 +2,268 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { State } from "../src/state.js";
 import { execute } from "../src/execute.js";
-import { command } from "../src/workspace.js";
 
-function fixture({ merged = false, closedIssue = false, changed = true, jobId = "comment-2" } = {}) {
+function fixture({ source = 19, closed = false, changed = true } = {}) {
   const state = new State(":memory:");
-  state.saveConversation(1, "agentle/1", 10, "saved-thread");
-  state.enqueue("old", 1, "original");
-  state.update("old", { state: "done", pr: 10 });
-  state.enqueue(jobId, 1, "followup", merged ? 1 : 10);
+  state.saveConversation(19, "agentle/19", 20, "saved-thread");
+  state.enqueue("comment-2", 19, "followup", source);
   const comments: [number, string, string][] = [];
-  const branches: string[] = [];
-  const resumed: string[] = [];
+  const switches: string[] = [], resumes: string[] = [], publications: string[] = [];
+  const reads: string[] = [];
+  let config: any, prompt = "", created = false;
+  let run: (call: (name: string, args: any) => Promise<any>) => Promise<string> = async () => "Verified.";
   const context = {
     state, cfg: { repository: "Ash42Z/agentle-monorepo", allowedUser: "Ash42Z" },
     gh: {
-      async api(path: string, method?: string) {
-        if (path === "/issues/1") return { state: closedIssue ? "closed" : "open", title: "Task" };
+      async api(path: string, method?: string, data?: any): Promise<any> {
+        reads.push(path);
+        if (path === "/issues/19") return { state: "open", title: "Task" };
+        if (path === "/issues/19/comments") return [{ body: "Issue context" }];
         if (path === "") return { default_branch: "main" };
-        if (path === "/pulls/10") return { state: merged ? "closed" : "open", merged };
-        if (path.startsWith("/pulls?")) return merged ? [] : [{ number: 10 }];
-        if (path === "/pulls" && method === "POST") return { number: 11 };
+        if (path === "/pulls/20") return { state: closed ? "closed" : "open", merged: closed, head: { ref: "agentle/19", repo: { full_name: "Ash42Z/agentle-monorepo" } } };
+        if (path === "/pulls/21") return { state: "open", head: { ref: "existing", repo: { full_name: "Ash42Z/agentle-monorepo" } } };
+        if (path.startsWith("/pulls?")) return path.endsWith(":agentle/19") ? [{ number: 20 }] : created ? [{ number: 22 }] : [];
+        if (path === "/pulls" && method === "POST") { assert.equal(data.draft, true); created = true; return { number: 22 }; }
         throw Error(path);
       },
-      async comment(number: number, id: string, text: string) { comments.push([number, id, text]); },
+      async comment(number: number, id: string, text: string) {
+        if (!comments.some(c => c[1] === id && c[0] === number)) comments.push([number, id, text]);
+      },
     },
     work: {
-      async prepare() { return "/workspace/1"; }, async refresh() {}, path() { return "/workspace/1"; },
-      async changed() { return changed; }, async publish() {},
-      async continueFromBase(_number: number, branch: string, base: string) { branches.push(`${branch}:${base}`); },
+      async prepare() { return "/workspace/19"; }, async refresh() {}, path() { return "/workspace/19"; },
+      async changed() { return changed; }, async publish(_number: number, branch: string) { publications.push(branch); },
+      async continueFromBase(_number: number, branch: string, base: string) { switches.push(`${branch}:${base}`); },
     },
     async connect() {
       return {
         async rpc(method: string, params?: any) {
-          if (method === "thread/resume") resumed.push(params.threadId);
+          if (method === "thread/resume") { resumes.push(params.threadId); config = params.config["mcp_servers.agentle_github"]; }
           return {};
         },
-        async run(_thread: string, _prompt: string, onPlan?: (text: string) => Promise<void>) {
-          await onPlan?.("I’ll inspect the request, implement it, and verify the changes.");
-          return "Implemented and verified.";
+        async run(_thread: string, text: string) {
+          prompt = text;
+          return run(async (name, args) => {
+            const response = await fetch(config.env.AGENTLE_TOOL_ENDPOINT, {
+              method: "POST", headers: { Authorization: `Bearer ${config.env.AGENTLE_TOOL_BEARER}` },
+              body: JSON.stringify({ method: "tools/call", params: { name, arguments: args } }),
+            });
+            return response.json();
+          });
         },
       };
     },
   };
-  return { state, context, comments, branches, resumed };
+  return { state, context, comments, switches, resumes, publications, reads, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
 }
 
-test("PR comments receive a plan and result without repeated issue links", async () => {
+test("issue replies stay on issue even with an associated PR; no automatic publication", async () => {
   const f = fixture();
   try {
     await execute(f.state.next()!, f.context);
-    assert.deepEqual(f.comments.map(c => c[0]), [10, 10]);
+    assert.deepEqual(f.comments.map(c => c[0]), [19]);
+    assert.deepEqual(f.publications, []);
+    assert.match(f.prompt(), /Source issue\/PR #19.*associated PR #20/);
+    assert.deepEqual(f.resumes, ["saved-thread"]);
     assert.equal(f.state.next(), undefined);
-    assert.deepEqual(f.resumed, ["saved-thread"]);
   } finally { f.state.db.close(); }
 });
 
-test("followups on a closed issue after merge create another PR and preserve thread and old PR routing", async () => {
-  const f = fixture({ merged: true, closedIssue: true });
+test("PR requests retain their source", async () => {
+  const f = fixture({ source: 20 });
   try {
     await execute(f.state.next()!, f.context);
-    assert.deepEqual(f.branches, ["agentle/1-comment-2:main"]);
-    assert.deepEqual(f.resumed, ["saved-thread"]);
-    assert.equal(f.state.conversation(1)?.pr, 11);
-    assert.equal(f.state.originNumber(10), 1);
-    assert.equal(f.state.originNumber(11), 1);
-    assert.deepEqual(f.comments.map(c => c[0]), [1, 11, 1]);
-    assert.match(f.comments[2][2], /#11/);
+    assert.deepEqual(f.comments.map(c => c[0]), [20]);
+    assert.match(f.prompt(), /Source issue\/PR #20/);
   } finally { f.state.db.close(); }
 });
 
-test("a merged PR followup with no file changes replies without creating a PR", async () => {
-  const f = fixture({ merged: true, changed: false });
+test("agent reads issue context, comments, publishes existing PR and comments again", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    const result = await call("github_read", { path: "/issues/19/comments" });
+    assert.match(result.content[0].text, /Issue context/);
+    await call("github_comment", { number: 19, key: "plan", body: "Starting." });
+    assert.deepEqual(f.comments.map(c => c[0]), [19]);
+    assert.deepEqual(f.publications, []);
+    assert.equal((await call("github_publish", { title: "Change", body: "Description" })).isError, undefined);
+    await call("github_comment", { number: 19, key: "result", body: "Verified; see #20." });
+    await call("github_comment", { number: 20, key: "review", body: "Ready for review." });
+    return "Done.";
+  });
   try {
     await execute(f.state.next()!, f.context);
-    assert.equal(f.state.conversation(1)?.pr, null);
-    assert.deepEqual(f.comments.map(c => c[0]), [1, 1]);
+    assert.deepEqual(f.comments.map(c => c[0]), [19, 19, 20]);
+    assert.deepEqual(f.publications, ["agentle/19"]);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
   } finally { f.state.db.close(); }
 });
 
-test("timestamped issue replies after merge use valid Git refs and retain their thread", async () => {
-  const jobId = "comment-6109895430-2026-10-11T14:10:36Z";
-  const f = fixture({ merged: true, closedIssue: true, jobId });
-  const continueFromBase = f.context.work.continueFromBase;
-  f.context.work.continueFromBase = async (number, branch, base) => {
-    await command(["git", "check-ref-format", `refs/heads/${branch}`], process.cwd());
-    await continueFromBase(number, branch, base);
+test("closed PR does not block discussion; agent chooses a new PR when needed", async () => {
+  const f = fixture({ closed: true });
+  f.setRun(async call => {
+    assert.equal((await call("github_publish", { title: "Followup", body: "More work" })).isError, true);
+    await call("github_workspace", { pr: null, key: "followup" });
+    const result = await call("github_publish", { title: "Followup", body: "More work" });
+    assert.match(result.content[0].text, /"pr":22/);
+    await call("github_comment", { number: 19, key: "result", body: "See #22." });
+    return "Done.";
+  });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.switches, ["agentle/19-comment-2-followup:main"]);
+    assert.equal(f.state.conversation(19)?.pr, 22);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+    assert.equal(f.state.originNumber(22), 19);
+    assert.deepEqual(f.comments.map(c => c[0]), [19]);
+  } finally { f.state.db.close(); }
+});
+
+test("agent can select another existing PR without merging default branch into it", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    await call("github_workspace", { pr: 21, key: "existing" });
+    await call("github_publish", { title: "Update", body: "Existing work" });
+    return "Verified.";
+  });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.switches, ["existing:existing"]);
+    assert.deepEqual(f.publications, ["existing"]);
+    assert.equal(f.state.conversation(19)?.pr, 21);
+  } finally { f.state.db.close(); }
+});
+
+test("interruption preserves thread and workspace; repeated comment key is idempotent", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    await call("github_comment", { number: 19, key: "plan", body: "Starting." });
+    throw Error("interrupted");
+  });
+  try {
+    await assert.rejects(execute(f.state.next()!, f.context), /interrupted/);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+    assert.equal(f.state.conversation(19)?.branch, "agentle/19");
+    f.state.update("comment-2", { state: "waiting" });
+    f.setRun(async call => {
+      await call("github_comment", { number: 19, key: "plan", body: "Starting." });
+      await call("github_comment", { number: 19, key: "result", body: "Resumed and verified." });
+      return "Done.";
+    });
+    await execute(f.state.next()!, f.context);
+    assert.equal(f.comments.length, 2);
+    assert.deepEqual(f.resumes, ["saved-thread", "saved-thread"]);
+  } finally { f.state.db.close(); }
+});
+
+test("read tools reject paths outside repository state and unknown actions", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    for (const path of ["/installation", "/issues/../../installation", "/issues/%2e%2e/secrets", "https://example.com", "/issues/19#fragment"]) {
+      assert.equal((await call("github_read", { path })).isError, true);
+      assert.ok(!f.reads.includes(path));
+    }
+    assert.equal((await call("merge", {})).isError, true);
+    return "Verified.";
+  });
+  try { await execute(f.state.next()!, f.context); } finally { f.state.db.close(); }
+});
+
+test("dirty workspace failure leaves conversation attached to its original branch", async () => {
+  const f = fixture();
+  f.context.work.continueFromBase = async () => { throw Error("Cannot start a followup branch with uncommitted work"); };
+  f.setRun(async call => {
+    assert.equal((await call("github_workspace", { pr: null, key: "new" })).isError, true);
+    assert.equal(f.state.conversation(19)?.branch, "agentle/19");
+    return "Saved work needs inspection.";
+  });
+  try { await execute(f.state.next()!, f.context); } finally { f.state.db.close(); }
+});
+
+test("previous release publishing jobs finish without resuming implementation and reply at source", async () => {
+  const f = fixture();
+  f.state.update("comment-2", { state: "publishing", result: "Saved result" });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.resumes, []);
+    assert.deepEqual(f.publications, ["agentle/19"]);
+    assert.deepEqual(f.comments.map(c => c[0]), [19]);
+    assert.equal(f.state.next(), undefined);
+  } finally { f.state.db.close(); }
+});
+
+test("multiple publications can occur within a turn and failed PR creation reconciles on retry", async () => {
+  const f = fixture();
+  const api = f.context.gh.api;
+  let fail = true;
+  f.context.gh.api = async (path, method, data) => {
+    const result = await api(path, method, data);
+    if (path === "/pulls" && method === "POST" && fail) { fail = false; throw Error("response lost after PR creation"); }
+    return result;
   };
+  f.setRun(async call => {
+    await call("github_workspace", { pr: null, key: "new" });
+    assert.equal((await call("github_publish", { title: "New PR", body: "Details" })).isError, true);
+    assert.match((await call("github_publish", { title: "New PR", body: "Details" })).content[0].text, /"pr":22/);
+    // Additional local work can be published again in this same turn.
+    await call("github_publish", { title: "New PR", body: "Details" });
+    return "Verified.";
+  });
+  // Fixture exposes the created PR for subsequent publication validation.
+  f.context.gh.api = ((previous) => async (path, method, data) => path === "/pulls/22" ? { state: "open" } : previous(path, method, data))(f.context.gh.api);
   try {
     await execute(f.state.next()!, f.context);
-    assert.deepEqual(f.branches, ["agentle/1-comment-6109895430-2026-10-11T14-10-36Z:main"]);
-    assert.deepEqual(f.resumed, ["saved-thread"]);
-    assert.equal(f.state.conversation(1)?.thread, "saved-thread");
-    assert.equal(f.state.conversation(1)?.pr, 11);
-    assert.equal(f.state.next(), undefined);
-    assert.deepEqual(f.comments.map(c => c[0]), [1, 11, 1]);
-    assert.ok(f.comments.every(c => c[1].startsWith(jobId)));
+    assert.equal(f.publications.length, 3);
+    assert.equal(f.reads.filter(path => path === "/pulls").length, 1);
+    assert.equal(f.state.conversation(19)?.pr, 22);
   } finally { f.state.db.close(); }
 });
 
-test("publication retry reconciles the new PR link without rerunning implementation", async () => {
-  const f = fixture({ merged: true });
+test("no-change publication creates no PR", async () => {
+  const f = fixture({ changed: false });
+  f.setRun(async call => {
+    await call("github_workspace", { pr: null, key: "new" });
+    assert.match((await call("github_publish", { title: "Discussion", body: "No code needed" })).content[0].text, /"changed":false/);
+    return "Answered.";
+  });
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.publications, []);
+    assert.equal(f.state.conversation(19)?.pr, null);
+  } finally { f.state.db.close(); }
+});
+
+test("failed final delivery retries without rerunning the completed agent", async () => {
+  const f = fixture();
   const comment = f.context.gh.comment;
   let fail = true;
   f.context.gh.comment = async (number, id, text) => {
-    if (id.endsWith("-link") && fail) { fail = false; throw Error("temporary failure"); }
+    if (fail) { fail = false; throw Error("temporary GitHub failure"); }
     await comment(number, id, text);
   };
   try {
-    await assert.rejects(execute(f.state.next()!, f.context), /temporary failure/);
-    assert.equal(f.state.next()?.state, "publishing");
-    // The newly created PR is now discoverable on the remote.
-    const api = f.context.gh.api;
-    f.context.gh.api = async (path, method) => path.startsWith("/pulls?") ? [{ number: 11 }] : api(path, method);
+    await assert.rejects(execute(f.state.next()!, f.context), /temporary GitHub failure/);
+    f.state.update("comment-2", { state: "waiting" });
     await execute(f.state.next()!, f.context);
-    assert.deepEqual(f.resumed, ["saved-thread"]);
-    assert.equal(f.comments.filter(c => c[1].endsWith("-link")).length, 1);
+    assert.deepEqual(f.resumes, ["saved-thread"]);
+    assert.deepEqual(f.comments.map(c => c[0]), [19]);
+    assert.equal(f.state.next(), undefined);
+  } finally { f.state.db.close(); }
+});
+
+test("quota waits keep source, thread and workspace", async () => {
+  const f = fixture({ source: 20 });
+  const connect = f.context.connect;
+  f.context.connect = async () => {
+    const c = await connect();
+    c.rpc = async method => method === "account/rateLimits/read" ? { rateLimits: { primary: { usedPercent: 100 } } } : {};
+    return c;
+  };
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.comments.map(c => c[0]), [20]);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+    assert.equal(f.state.conversation(19)?.branch, "agentle/19");
     assert.equal(f.state.next(), undefined);
   } finally { f.state.db.close(); }
 });

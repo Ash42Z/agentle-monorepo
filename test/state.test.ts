@@ -81,3 +81,23 @@ test("request source migration preserves old jobs and accepts previous-release i
     s.db.close();
   } finally { rmSync(dir, { recursive: true }); }
 });
+
+test("all PR associations survive workspace switches, restart and previous-release writes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentle-associations-"));
+  try {
+    let s = new State(join(dir, "db"));
+    s.saveConversation(19, "agentle/19", 20, "thread");
+    s.saveConversation(19, "new", 22, "thread");
+    s.saveConversation(19, "next", null, "thread");
+    s.db.close();
+    s = new State(join(dir, "db"));
+    assert.equal(s.originNumber(20), 19);
+    assert.equal(s.originNumber(22), 19);
+    // Older releases continue to write their unchanged conversations schema.
+    s.db.prepare("INSERT INTO conversations VALUES(?,?,?,?)").run(23, "old-release", 24, "other-thread");
+    assert.equal(s.originNumber(24), 23);
+    s.saveConversation(19, "shared", 24, "thread");
+    assert.equal(s.originNumber(24), 23);
+    s.db.close();
+  } finally { rmSync(dir, { recursive: true }); }
+});
