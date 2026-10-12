@@ -39,7 +39,7 @@ test('replays reset audio and cancel old timers; stop cancels playback', async (
   audio.currentTime = .4;
   await player.play(track.preview, 2);
   assert.equal(audio.currentTime, 0); assert.equal(timers.has(1), false); assert.equal(timers.get(2)?.delay, 2000);
-  timers.get(2)!.callback(); assert.equal(timers.size, 0); assert.equal(pauses, 3);
+  audio.currentTime = 2; timers.get(2)!.callback(); assert.equal(timers.size, 0); assert.equal(pauses, 3);
 });
 test('pending playback cannot schedule a stale timer after stop', async () => {
   let resolve!: () => void, scheduled = false;
@@ -83,4 +83,37 @@ test('catalog follows pagination using local routes and stops on empty pages', a
   let calls = 0;
   assert.deepEqual(await game.catalog(async () => { calls++; return { data: [], next: 'more' }; }, 'albums/1/tracks'), []);
   assert.equal(calls, 1);
+});
+
+test('skip extends active playback without pausing, seeking or playing again', async () => {
+  const timers = new Map<number, { callback: () => void, delay: number }>(); let id = 0, pauses = 0, plays = 0;
+  const audio = { src: '', currentTime: 0, pause: () => pauses++, play: async () => { plays++; } };
+  const player = new game.ClipPlayer(audio, (callback: () => void, delay: number) => { timers.set(++id, { callback, delay }); return id; }, (key: number) => timers.delete(key));
+  await player.play(track.preview, .5);
+  audio.currentTime = .3;
+  await player.extend(track.preview, 2);
+  assert.equal(audio.currentTime, .3); assert.equal(plays, 1); assert.equal(pauses, 1);
+  assert.equal(timers.has(1), false); assert.equal(timers.get(2)?.delay, 1700);
+  audio.currentTime = 1;
+  await player.extend(track.preview, 8);
+  assert.equal(timers.get(3)?.delay, 7000); assert.equal(plays, 1);
+  audio.currentTime = 8; timers.get(3)!.callback();
+  assert.equal(pauses, 2); assert.equal(timers.size, 0);
+  await player.extend(track.preview, 15);
+  assert.equal(audio.currentTime, 8); assert.equal(plays, 2);
+  assert.equal(timers.get(4)?.delay, 7000);
+});
+test('buffering does not consume segment time and pending play uses the extended cutoff', async () => {
+  let resolve!: () => void;
+  const timers = new Map<number, { callback: () => void, delay: number }>(); let id = 0;
+  const audio = { src: '', currentTime: 0, pause() {}, play: () => new Promise<void>(r => { resolve = r; }) };
+  const player = new game.ClipPlayer(audio, (callback: () => void, delay: number) => { timers.set(++id, { callback, delay }); return id; }, (key: number) => timers.delete(key));
+  const pending = player.play(track.preview, .5);
+  await player.extend(track.preview, 2);
+  resolve(); await pending;
+  assert.equal(timers.size, 1); assert.equal(timers.get(id)?.delay, 2000);
+  timers.get(id)!.callback();
+  assert.equal(player.active, true); assert.equal(timers.size, 1);
+  audio.currentTime = 2; timers.get(id)!.callback();
+  assert.equal(player.active, false); assert.equal(timers.size, 0);
 });

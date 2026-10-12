@@ -22,20 +22,42 @@ export class Round {
     this.step++; return 'longer';
   }
 }
-// One audio source, one timer: every replay starts at the same point in the preview.
+// Replays start at zero; extensions preserve playback and use the new segment cutoff.
 export class ClipPlayer {
   constructor(audio, schedule = (callback, delay) => setTimeout(callback, delay), cancel = timer => clearTimeout(timer)) {
-    this.audio = audio; this.schedule = schedule; this.cancel = cancel; this.version = 0;
+    this.audio = audio; this.schedule = schedule; this.cancel = cancel; this.version = 0; this.active = false;
+    this.audio.addEventListener?.('timeupdate', () => {
+      if (this.active && this.audio.currentTime >= this.seconds) this.stop();
+    });
   }
-  stop() { this.version++; this.cancel(this.timer); this.audio.pause(); }
+  stop() { this.version++; this.active = false; this.cancel(this.timer); this.audio.pause(); }
+  arm() {
+    this.cancel(this.timer);
+    const remaining = this.seconds - this.audio.currentTime;
+    if (remaining <= 0) { this.stop(); return; }
+    this.timer = this.schedule(() => this.arm(), remaining * 1000);
+  }
+  async extend(url, seconds) {
+    if (this.audio.src !== url) return this.play(url, seconds);
+    this.seconds = seconds;
+    if (this.active) { this.arm(); return; }
+    // A completed shorter segment resumes from its cutoff instead of replaying.
+    const version = this.version;
+    this.active = true;
+    try { await this.audio.play(); }
+    catch (error) { if (version === this.version) this.stop(); throw error; }
+    if (version === this.version) this.arm();
+  }
   async play(url, seconds) {
     this.stop();
     const version = this.version;
     if (this.audio.src !== url) this.audio.src = url;
     this.audio.currentTime = 0;
-    await this.audio.play();
+    this.seconds = seconds; this.active = true;
+    try { await this.audio.play(); }
+    catch (error) { if (version === this.version) this.stop(); throw error; }
     if (version !== this.version) return;
-    this.timer = this.schedule(() => this.stop(), seconds * 1000);
+    this.arm();
   }
 }
 

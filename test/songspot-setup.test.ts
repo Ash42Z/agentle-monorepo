@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 const game = await import(pathToFileURL(`${process.cwd()}/web/songspot/game.mjs`).href);
 const presets = await import(pathToFileURL(`${process.cwd()}/web/songspot/presets.mjs`).href);
 class Element {
-  children: Element[] = []; dataset: Record<string, string> = {}; textContent = ''; value = ''; disabled = false;
+  children: Element[] = []; dataset: Record<string, string> = {}; textContent = ''; value: string | number = ''; max = 0; disabled = false;
   hidden = false; checked = false; open = false; onclick?: () => unknown; onchange?: () => unknown; onsubmit?: (event: any) => unknown;
   append(...items: Element[]) { this.children.push(...items); }
   replaceChildren(...items: Element[]) { this.children = items; }
@@ -21,11 +21,21 @@ function setup(storage: any, failCatalog = false) {
   const element = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
   element('game').hidden = true; element('start').disabled = true;
   const paths: string[] = [];
+  const events = new Map<string, () => void>();
+  const audio = { src: '', currentTime: 0, paused: true, plays: 0, pauses: 0,
+    addEventListener: (event: string, callback: () => void) => { const prior = events.get(event); events.set(event, () => { prior?.(); callback(); }); },
+    pause() { this.paused = true; this.pauses++; events.get('pause')?.(); },
+    async play() { this.paused = false; this.plays++; events.get('playing')?.(); }
+  };
+  const timers = new Map<number, () => void>(); let timer = 0;
+  class TestPlayer extends game.ClipPlayer {
+    constructor(media: unknown) { super(media, (callback: () => void) => { timers.set(++timer, callback); return timer; }, (key: number) => timers.delete(key)); }
+  }
   const source = readFileSync('web/songspot/app.mjs', 'utf8').replace(/^import .*;\n/gm, '');
   runInNewContext(source, {
-    ...game, ...presets, localStorage: storage, AbortSignal, Number, Map, Set,
+    ...game, ...presets, ClipPlayer: TestPlayer, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, localStorage: storage, AbortSignal, Number, Map, Set,
     document: { getElementById: element, createElement: () => new Element(), addEventListener() {} },
-    window: { addEventListener() {} }, Audio: class { pause() {} },
+    window: { addEventListener() {} }, Audio: class { constructor() { return audio; } },
     fetch: async (path: string) => {
       paths.push(path);
       if (path.includes('/albums') && failCatalog) throw Error('Catalog failed');
@@ -33,7 +43,7 @@ function setup(storage: any, failCatalog = false) {
       return { ok: true, json: async () => ({ data }) };
     }
   });
-  return { element, paths };
+  return { element, paths, audio, events, timers };
 }
 async function choose(app: ReturnType<typeof setup>) {
   app.element('artist-query').value = 'Queen';
@@ -82,4 +92,29 @@ test('storage write failures keep current album choices playable', async () => {
   await app.element('start').onclick!();
   assert.equal(app.element('game').hidden, false);
   assert.equal(app.paths.some(path => path.includes('albums/20/tracks')), false);
+});
+
+test('timeline follows playback and skip extends it without restarting; replay and next reset', async () => {
+  const app = setup({ getItem: () => null, setItem() {} }); await choose(app);
+  await app.element('start').onclick!();
+  assert.equal(app.element('segment-time').textContent, '0.0s / 0.5s');
+  app.element('play').onclick!(); await settle();
+  app.audio.currentTime = .3; app.events.get('timeupdate')!();
+  assert.equal(app.element('segment-progress').value, .3);
+  assert.equal(app.element('segment-time').textContent, '0.3s / 0.5s');
+  const pauses = app.audio.pauses;
+  app.element('skip').onclick!(); await settle();
+  assert.equal(app.audio.currentTime, .3); assert.equal(app.audio.plays, 1); assert.equal(app.audio.pauses, pauses);
+  assert.equal(app.element('segment-progress').max, 2);
+  assert.equal(app.element('segment-time').textContent, '0.3s / 2s');
+  app.audio.currentTime = 2; app.events.get('timeupdate')!();
+  assert.equal(app.audio.paused, true);
+  app.element('skip').onclick!(); await settle();
+  assert.equal(app.audio.currentTime, 2); assert.equal(app.audio.plays, 2);
+  app.element('play').onclick!(); await settle();
+  assert.equal(app.audio.currentTime, 0); assert.equal(app.element('segment-time').textContent, '0.0s / 8s');
+  app.audio.currentTime = 3;
+  app.element('next').onclick!();
+  assert.equal(app.element('segment-progress').value, 0);
+  assert.equal(app.element('segment-time').textContent, '0.0s / 0.5s');
 });
