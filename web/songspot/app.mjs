@@ -144,11 +144,33 @@ $('start').onclick = async () => {
   } catch (error) { status(error.message); }
   finally { busy = false; artistChips(); renderPlaylists(); }
 };
+function updateTimeline() {
+  if (!round) return;
+  const elapsed = Math.min(round.seconds, Math.max(0, audio.currentTime || 0));
+  $('segment-progress').max = lengths.at(-1);
+  $('segment-progress').value = elapsed;
+  $('segment-time').textContent = `${elapsed.toFixed(1)}s / ${lengths.at(-1)}s`;
+}
+let timelineFrame;
+function animateTimeline() {
+  updateTimeline();
+  if (!audio.paused) timelineFrame = requestAnimationFrame(animateTimeline);
+}
+audio.addEventListener('playing', () => { cancelAnimationFrame(timelineFrame); animateTimeline(); });
+for (const event of ['timeupdate', 'pause', 'ended', 'seeking']) audio.addEventListener(event, updateTimeline);
 function render() {
+  updateTimeline();
   $('round-number').textContent = `ROUND ${count}`;
   $('score').textContent = `${wins} guessed · ${points} points`;
   $('duration').textContent = `${round.seconds} seconds · replay as often as you like`;
-  $('steps').replaceChildren(...lengths.map((seconds, index) => { const li = document.createElement('li'); li.textContent = `${seconds}s`; if (index === round.step) li.className = 'active'; return li; }));
+  $('steps').replaceChildren(...lengths.map((seconds, index) => {
+    const li = document.createElement('li');
+    li.style.left = `${seconds / lengths.at(-1) * 100}%`;
+    const label = document.createElement('span'); label.textContent = `${seconds}s`; li.append(label);
+    if (index <= round.step) li.className = 'unlocked';
+    if (index === round.step) { li.className += ' active'; li.setAttribute('aria-current', 'step'); }
+    return li;
+  }));
   $('guess-form').hidden = $('skip').hidden = round.done;
   $('next').hidden = $('answer').hidden = !round.done;
   $('skip').textContent = round.step === 3 ? 'Reveal song' : 'Skip → hear more';
@@ -159,7 +181,7 @@ function render() {
   }
 }
 function nextRound() {
-  player.stop();
+  player.stop(); audio.currentTime = 0;
   if (!deck.length) {
     deck = [...tracks];
     for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
@@ -167,17 +189,18 @@ function nextRound() {
   }
   round = new Round(deck.pop()); count++; render(); status('Listen to the first half second, then take a guess.');
 }
-async function play() {
+async function play(extend = false) {
   const active = round;
-  try { await player.play(active.track.preview, active.seconds); }
+  try { await player[extend ? 'extend' : 'play'](active.track.preview, active.seconds); updateTimeline(); }
   catch { if (round === active && !$('game').hidden) { $('next').hidden = false; status('Preview could not play. Try replaying, or move to another song.'); } }
 }
 function submit(guess) {
-  player.stop(); const outcome = round.submit(guess);
+  const outcome = round.submit(guess);
+  if (outcome !== 'longer' || guess) player.stop();
   if (outcome === 'correct') { wins++; points += lengths.length - round.step; }
   render();
   status(outcome === 'correct' ? 'You got it!' : outcome === 'finished' ? 'That was the last clip. Here’s the song.' : `${guess ? 'Not quite.' : 'More to go on.'} Listen to ${round.seconds} seconds.`);
-  if (outcome === 'longer') void play();
+  if (outcome === 'longer') void play(!guess);
 }
 $('play').onclick = () => void play();
 $('guess-form').onsubmit = event => { event.preventDefault(); const guess = $('guess').value.trim(); if (guess) submit(guess); };
