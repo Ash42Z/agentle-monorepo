@@ -32,3 +32,28 @@ const rl=require('readline').createInterface({input:process.stdin});let initiali
     rmSync(dir, { recursive: true });
   }
 });
+
+test("graceful shutdown flushes state and allows a new process to resume the same thread", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentle-shutdown-"));
+  const bin = join(dir, "fake");
+  writeFileSync(bin, `#!/usr/bin/env node
+const fs=require('fs');const path=require('path');const file=path.join(process.env.HOME,'saved-thread');
+const rl=require('readline').createInterface({input:process.stdin});
+let thread=null;
+rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;
+if(m.method==='thread/start')thread='same-thread';
+if(m.method==='thread/resume')thread=fs.readFileSync(file,'utf8');
+console.log(JSON.stringify({id:m.id,result:{thread:{id:thread}}}));});
+rl.on('close',()=>{if(thread)fs.writeFileSync(file,thread);process.exit(0);});
+`, { mode: 0o700 });
+  let c = new Codex(bin, dir);
+  try {
+    assert.equal((await c.rpc("thread/start")).thread.id, "same-thread");
+    await c.stop();
+    assert.equal(c.child.exitCode, 0);
+    c = new Codex(bin, dir);
+    assert.equal((await c.rpc("thread/resume", { threadId: "same-thread" })).thread.id, "same-thread");
+    await c.stop();
+    await c.stop(); // Already-exited processes are safe to stop again.
+  } finally { c.close(); rmSync(dir, { recursive: true }); }
+});

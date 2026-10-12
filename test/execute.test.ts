@@ -11,6 +11,10 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
   const switches: string[] = [], resumes: string[] = [], publications: string[] = [];
   const reads: string[] = [];
   let config: any, prompt = "", created = false;
+  const connections: boolean[] = [];
+  const instructions: string[] = [];
+  const reconciliations: boolean[] = [];
+  const injections: any[] = [];
   let run: (call: (name: string, args: any) => Promise<any>) => Promise<string> = async () => "Verified.";
   const context = {
     state, cfg: { repository: "Ash42Z/agentle-monorepo", allowedUser: "Ash42Z" },
@@ -32,16 +36,19 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
     },
     work: {
       async prepare() { return "/workspace/19"; }, async refresh() {}, path() { return "/workspace/19"; },
-      async changed() { return changed; }, async publish(_number: number, branch: string) { publications.push(branch); },
+      async changed() { return changed; }, async publish(_number: number, branch: string, _base: string, _job: string, reconcile = false) { publications.push(branch); reconciliations.push(reconcile); },
       async continueFromBase(_number: number, branch: string, base: string) { switches.push(`${branch}:${base}`); },
     },
-    async connect() {
+    async connect(fresh = false) {
+      connections.push(fresh);
       return {
         async rpc(method: string, params?: any) {
-          if (method === "thread/resume") { resumes.push(params.threadId); config = params.config["mcp_servers.agentle_github"]; }
+          if (method === "thread/inject_items") injections.push(params);
+          if (method === "thread/resume") { resumes.push(params.threadId); instructions.push(params.developerInstructions); config = params.config["mcp_servers.agentle_github"]; }
           return {};
         },
         async run(_thread: string, text: string) {
+          assert.equal(injections.at(-1)?.threadId, _thread);
           prompt = text;
           return run(async (name, args) => {
             const response = await fetch(config.env.AGENTLE_TOOL_ENDPOINT, {
@@ -54,7 +61,7 @@ function fixture({ source = 19, closed = false, changed = true } = {}) {
       };
     },
   };
-  return { state, context, comments, switches, resumes, publications, reads, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
+  return { state, context, comments, switches, resumes, publications, reads, connections, instructions, injections, reconciliations, setRun(fn: typeof run) { run = fn; }, prompt: () => prompt };
 }
 
 test("issue replies stay on issue even with an associated PR; no automatic publication", async () => {
@@ -95,6 +102,7 @@ test("agent reads issue context, comments, publishes existing PR and comments ag
     await execute(f.state.next()!, f.context);
     assert.deepEqual(f.comments.map(c => c[0]), [19, 19, 20]);
     assert.deepEqual(f.publications, ["agentle/19"]);
+    assert.deepEqual(f.reconciliations, [true]);
     assert.equal(f.state.conversation(19)?.thread, "saved-thread");
   } finally { f.state.db.close(); }
 });
@@ -113,6 +121,7 @@ test("closed PR does not block discussion; agent chooses a new PR when needed", 
     await execute(f.state.next()!, f.context);
     assert.deepEqual(f.switches, ["agentle/19-comment-2-followup:main"]);
     assert.equal(f.state.conversation(19)?.pr, 22);
+    assert.deepEqual(f.reconciliations, [false]);
     assert.equal(f.state.conversation(19)?.thread, "saved-thread");
     assert.equal(f.state.originNumber(22), 19);
     assert.deepEqual(f.comments.map(c => c[0]), [19]);
@@ -265,5 +274,79 @@ test("quota waits keep source, thread and workspace", async () => {
     assert.equal(f.state.conversation(19)?.thread, "saved-thread");
     assert.equal(f.state.conversation(19)?.branch, "agentle/19");
     assert.equal(f.state.next(), undefined);
+  } finally { f.state.db.close(); }
+});
+
+
+test("every job cold-resumes the saved thread with current publication instructions", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    assert.equal((await call("github_publish", {})).isError, undefined);
+    return "Verified.";
+  });
+  try {
+    await execute(f.state.next()!, f.context);
+    f.state.enqueue("comment-3", 19, "Another update", 19);
+    await execute(f.state.next()!, f.context);
+    assert.deepEqual(f.connections, [true, true]);
+    assert.deepEqual(f.resumes, ["saved-thread", "saved-thread"]);
+    assert.deepEqual(f.publications, ["agentle/19", "agentle/19"]);
+    assert.equal(f.reads.filter(path => path === "/pulls").length, 0);
+    for (const instructions of f.instructions) {
+      assert.match(instructions, /You decide.*create a new PR or update an existing PR/);
+      assert.match(instructions, /github_publish performs the commit and push immediately/);
+      assert.match(instructions, /does not publish automatically when your turn ends/);
+    }
+  } finally { f.state.db.close(); }
+});
+
+test("new PR publication needs metadata and does not push when it is missing", async () => {
+  const f = fixture();
+  f.setRun(async call => {
+    await call("github_workspace", { pr: null, key: "new" });
+    const result = await call("github_publish", {});
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /Supply title and body/);
+    assert.deepEqual(f.publications, []);
+    return "Metadata needed.";
+  });
+  try { await execute(f.state.next()!, f.context); } finally { f.state.db.close(); }
+});
+
+
+test("resumed conversations receive current controller-tool authorization in developer history", async () => {
+  const f = fixture();
+  try {
+    await execute(f.state.next()!, f.context);
+    assert.equal(f.injections.length, 1);
+    const injection = f.injections[0];
+    assert.equal(injection.threadId, "saved-thread");
+    assert.equal(injection.items[0].role, "developer");
+    const policy = injection.items[0].content[0].text;
+    assert.match(policy, /supersedes older publication instructions/);
+    assert.match(policy, /authorized to invoke.*github_publish/);
+    assert.match(policy, /This tool is the controller/);
+    assert.match(policy, /Never merge, push to the default branch, access controller credentials/);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+  } finally { f.state.db.close(); }
+});
+
+test("failed policy injection preserves the saved thread and never starts an unauthorized turn", async () => {
+  const f = fixture();
+  const connect = f.context.connect;
+  f.context.connect = async (fresh = false) => {
+    const c = await connect(fresh), rpc = c.rpc;
+    c.rpc = async (method, params) => {
+      if (method === "thread/inject_items") throw Error("Policy injection unavailable");
+      return rpc(method, params);
+    };
+    return c;
+  };
+  f.setRun(async () => { assert.fail("Should not start generation without current policy"); });
+  try {
+    await assert.rejects(execute(f.state.next()!, f.context), /Policy injection unavailable/);
+    assert.equal(f.state.conversation(19)?.thread, "saved-thread");
+    assert.equal(f.state.conversation(19)?.branch, "agentle/19");
+    assert.deepEqual(f.publications, []);
   } finally { f.state.db.close(); }
 });
