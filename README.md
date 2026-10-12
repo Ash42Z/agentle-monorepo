@@ -64,6 +64,18 @@ docker run --rm -e AGENTLE_RELEASE=local agentle-web:local caddy validate --conf
 AGENTLE_IMAGE=agentle:local AGENTLE_WEB_IMAGE=agentle-web:local AGENTLE_RELEASE=local docker compose config --quiet
 ```
 
+## PR web previews
+
+Successful same-repository PR CI automatically publishes the tested web content
+at `https://agentle.cc/previews/pr-<number>/` and posts a link on the PR. Use the
+existing dashboard login. Preview dashboard pages use the live read-only worker
+API; Songspot works under the preview prefix. Closing or merging removes the
+preview during the next successful reconciliation (polled every 30 seconds).
+Setup happens through the normal merge deployment, using existing App credentials
+and Actions read permission. See [architecture and limits](docs/pr-previews.md).
+Only static web content is previewed; PR controller/server code is not deployed.
+Preview and production share browser origin, credentials and local storage.
+
 ## Worker dashboard
 
 The home page shows the active request and PR, execution state, and pending requests in arrival order, including retry times and requests blocked by earlier work on the same conversation. Status refreshes every 30 seconds. Sign in using the browser’s username/password prompt over HTTPS. The dashboard no longer accepts or stores controller or GitHub tokens.

@@ -52,7 +52,8 @@ docker compose --project-name agentle-bot --env-file "$release_dir/release.env" 
 healthy=false
 for attempt in $(seq 1 "${AGENTLE_READY_ATTEMPTS:-60}"); do
  if admin_request ready | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(not d["ready"] or d["release"]!=sys.argv[1])' "$release_sha"; then
-  if [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T caddy wget -q -O - http://127.0.0.1:8081/health) == "$release_sha" ]]; then healthy=true;break;fi
+  if [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T caddy wget -q -O - http://127.0.0.1:8081/health) == "$release_sha" ]] &&
+     [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T previews node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/preview-ready.json"));if(Date.now()-d.time>120000)process.exit(1);console.log(d.release)') == "$release_sha" ]]; then healthy=true;break;fi
  fi
  sleep 2
 done

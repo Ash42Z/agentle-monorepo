@@ -35,7 +35,7 @@ function fixture(mode: string) {
   script("git", `echo ${sha}`);
   script(
     "docker",
-    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\nif [[ "$*" == *"exec -T caddy"* ]]; then echo ${mode === "web-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"caddy validate"* && "${mode}" == "invalid-web" ]]; then exit 1;fi\n`,
+    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\nif [[ "$*" == *"exec -T previews"* ]]; then echo ${mode === "preview-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"exec -T caddy"* ]]; then echo ${mode === "web-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"caddy validate"* && "${mode}" == "invalid-web" ]]; then exit 1;fi\n`,
   );
   script(
     "curl",
@@ -138,4 +138,16 @@ test("failed web readiness rolls back and removes newly introduced services", ()
   } finally {
     rmSync(f.root, { recursive: true });
   }
+});
+
+test("failed preview readiness restores the prior release", () => {
+  const f = fixture("preview-rollback");
+  try {
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.ok(log.includes("exec -T previews"));
+    assert.equal(log.split("up -d").length - 1, 2);
+    assert.equal(readlinkSync(join(f.host, "current")), f.old);
+  } finally { rmSync(f.root, { recursive: true }); }
 });

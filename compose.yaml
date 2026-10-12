@@ -34,8 +34,22 @@ services:
       AGENTLE_RELEASE: ${AGENTLE_RELEASE:?Set AGENTLE_RELEASE}
       AGENTLE_DASHBOARD_USER: ${AGENTLE_DASHBOARD_USER:-Ash42Z}
     volumes:
+      - previews:/previews:ro
       - /root/.config/agentle/admin-token:/run/secrets/controller-token:ro
       - /root/.config/agentle/dashboard-password:/run/secrets/dashboard-password:ro
+  previews:
+    image: ${AGENTLE_IMAGE:?Set AGENTLE_IMAGE}
+    command: ["./node_modules/.bin/tsx", "src/previews-main.ts"]
+    restart: unless-stopped
+    init: true
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      AGENTLE_RELEASE: ${AGENTLE_RELEASE:?Set AGENTLE_RELEASE}
+    volumes:
+      - /root/.config/agentle/config.json:/config/config.json:ro
+      - /root/.config/agentle/github-app.pem:/config/github-app.pem:ro
+      - previews:/previews
   caddy:
     image: ${AGENTLE_WEB_IMAGE:?Set AGENTLE_WEB_IMAGE}
     restart: unless-stopped
@@ -54,5 +68,6 @@ services:
       timeout: 5s
       retries: 3
 volumes:
+  previews:
   caddy_data:
   caddy_config:

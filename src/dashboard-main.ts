@@ -7,6 +7,7 @@ const server = dashboardServer({
   password: secret("/run/secrets/dashboard-password"),
   upstream: "http://bot:8080",
   release: process.env.AGENTLE_RELEASE ?? "development",
+  previews: "/previews",
 });
 server.listen(8082, "0.0.0.0");
 for (const signal of ["SIGTERM", "SIGINT"] as const)
