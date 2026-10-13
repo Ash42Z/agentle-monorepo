@@ -22,23 +22,37 @@ export async function command(
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let out = "", stderr = "";
+    let out = "",
+      stderr = "";
     p.stdout.on("data", (b) => {
       out += b;
       if (out.length > 4_000_000) p.kill();
     });
     // Do not expose raw stderr: Git may include authentication material in URLs.
-    p.stderr.on("data", b => { stderr = (stderr + b).slice(-16_000); });
+    p.stderr.on("data", (b) => {
+      stderr = (stderr + b).slice(-16_000);
+    });
     p.on("error", reject);
     p.on("exit", (code) =>
       code === 0
         ? resolve(out.trim())
-        : reject(Error(`${args[0]} ${args[0] === "git" ? args.find(a => ["clone", "fetch", "merge", "add", "commit", "push", "checkout", "status", "diff", "config", "check-ref-format"].includes(a)) ?? "operation" : args[1]} failed (${code})${
-          /non-fast-forward|fetch first/i.test(stderr) ? ": remote branch advanced; reconcile its head and retry without force-pushing" :
-          /workflow.*permission|workflows.*permission/i.test(stderr) ? ": GitHub rejected a workflow update; the App installation needs workflows write permission" :
-          /permission denied.*index\.lock|index\.lock.*permission denied/i.test(stderr) ? ": Git cannot write its index" :
-          /CONFLICT|unmerged files/i.test(stderr) ? ": merge conflicts need resolution in the saved workspace" : ""
-        }`)),
+        : reject(
+            Error(
+              `${args[0]} ${args[0] === "git" ? (args.find((a) => ["clone", "fetch", "merge", "add", "commit", "push", "checkout", "status", "diff", "config", "check-ref-format"].includes(a)) ?? "operation") : args[1]} failed (${code})${
+                /non-fast-forward|fetch first/i.test(stderr)
+                  ? ": remote branch advanced; reconcile its head and retry without force-pushing"
+                  : /workflow.*permission|workflows.*permission/i.test(stderr)
+                    ? ": GitHub rejected a workflow update; the App installation needs workflows write permission"
+                    : /permission denied.*index\.lock|index\.lock.*permission denied/i.test(
+                          stderr,
+                        )
+                      ? ": Git cannot write its index"
+                      : /CONFLICT|unmerged files/i.test(stderr)
+                        ? ": merge conflicts need resolution in the saved workspace"
+                        : ""
+              }`,
+            ),
+          ),
     );
   });
 }
@@ -170,11 +184,21 @@ export class Workspaces {
     } catch (error) {
       await this.ownFiles(dir);
       if (requireMerge) {
-        const conflicts = await command([
-          "git", "-c", `safe.directory=${dir}`, "diff", "--name-only", "--diff-filter=U",
-        ], dir);
+        const conflicts = await command(
+          [
+            "git",
+            "-c",
+            `safe.directory=${dir}`,
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+          ],
+          dir,
+        );
         if (conflicts)
-          throw Error("Publication paused: the PR head has merge conflicts in the saved workspace. Inspect git status, resolve the conflicting files, run checks, and call github_publish again. Local commits and remote history are preserved.");
+          throw Error(
+            "Publication paused: the PR head has merge conflicts in the saved workspace. Inspect git status, resolve the conflicting files, run checks, and call github_publish again. Local commits and remote history are preserved.",
+          );
         throw error;
       }
       // Initial refresh may encounter uncommitted work; leave it for the agent.
@@ -198,12 +222,28 @@ export class Workspaces {
     if (await command([...args, "status", "--porcelain"], dir))
       throw Error("Cannot start a followup branch with uncommitted work");
     await command(["git", "check-ref-format", "refs/heads/" + branch], dir);
-    await this.authenticated([
-      "-c", `safe.directory=${dir}`, "fetch",
-      "https://github.com/" + this.gh.config.repository + ".git",
-      `refs/heads/${base}:refs/remotes/origin/${base}`,
-    ], dir);
-    await command([...args, "-c", "core.hooksPath=/dev/null", "checkout", "-B", branch, `origin/${base}`], dir);
+    await this.authenticated(
+      [
+        "-c",
+        `safe.directory=${dir}`,
+        "fetch",
+        "https://github.com/" + this.gh.config.repository + ".git",
+        `refs/heads/${base}:refs/remotes/origin/${base}`,
+      ],
+      dir,
+    );
+    await command(
+      [
+        ...args,
+        "-c",
+        "core.hooksPath=/dev/null",
+        "checkout",
+        "-B",
+        branch,
+        `origin/${base}`,
+      ],
+      dir,
+    );
     await this.ownFiles(dir);
   }
   async changed(number: number, base: string) {
@@ -217,7 +257,13 @@ export class Workspaces {
         )),
     );
   }
-  async publish(number: number, branch: string, base: string, jobId: string, reconcile = false) {
+  async publish(
+    number: number,
+    branch: string,
+    base: string,
+    jobId: string,
+    reconcile = false,
+  ) {
     if (branch === base || branch === "main" || branch.startsWith("-"))
       throw Error("Unsafe publishing branch");
     const dir = this.path(number);

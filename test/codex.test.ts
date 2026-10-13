@@ -18,10 +18,13 @@ const rl=require('readline').createInterface({input:process.stdin});let initiali
     await c.init();
     assert.equal((await c.rpc("account/read")).ok, true);
     const plans: string[] = [];
-    assert.equal(await c.run("thread", "first", async text => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-      plans.push(text);
-    }), "verified");
+    assert.equal(
+      await c.run("thread", "first", async (text) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        plans.push(text);
+      }),
+      "verified",
+    );
     assert.deepEqual(plans, ["plan"]);
     await assert.rejects(
       c.run("thread", "second"),
@@ -36,7 +39,9 @@ const rl=require('readline').createInterface({input:process.stdin});let initiali
 test("graceful shutdown flushes state and allows a new process to resume the same thread", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentle-shutdown-"));
   const bin = join(dir, "fake");
-  writeFileSync(bin, `#!/usr/bin/env node
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node
 const fs=require('fs');const path=require('path');const file=path.join(process.env.HOME,'saved-thread');
 const rl=require('readline').createInterface({input:process.stdin});
 let thread=null;
@@ -45,15 +50,23 @@ if(m.method==='thread/start')thread='same-thread';
 if(m.method==='thread/resume')thread=fs.readFileSync(file,'utf8');
 console.log(JSON.stringify({id:m.id,result:{thread:{id:thread}}}));});
 rl.on('close',()=>{if(thread)fs.writeFileSync(file,thread);process.exit(0);});
-`, { mode: 0o700 });
+`,
+    { mode: 0o700 },
+  );
   let c = new Codex(bin, dir);
   try {
     assert.equal((await c.rpc("thread/start")).thread.id, "same-thread");
     await c.stop();
     assert.equal(c.child.exitCode, 0);
     c = new Codex(bin, dir);
-    assert.equal((await c.rpc("thread/resume", { threadId: "same-thread" })).thread.id, "same-thread");
+    assert.equal(
+      (await c.rpc("thread/resume", { threadId: "same-thread" })).thread.id,
+      "same-thread",
+    );
     await c.stop();
     await c.stop(); // Already-exited processes are safe to stop again.
-  } finally { c.close(); rmSync(dir, { recursive: true }); }
+  } finally {
+    c.close();
+    rmSync(dir, { recursive: true });
+  }
 });

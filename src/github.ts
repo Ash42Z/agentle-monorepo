@@ -81,16 +81,31 @@ export class GitHub {
     );
   }
   async artifact(id: number): Promise<Buffer> {
-    const response = await fetch(`https://api.github.com/repos/${this.config.repository}/actions/artifacts/${id}/zip`, {
-      headers: { Authorization: "Bearer " + await this.installationToken() },
-      redirect: "manual", signal: AbortSignal.timeout(30_000),
-    });
+    const response = await fetch(
+      `https://api.github.com/repos/${this.config.repository}/actions/artifacts/${id}/zip`,
+      {
+        headers: {
+          Authorization: "Bearer " + (await this.installationToken()),
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
     const location = response.headers.get("location");
-    if (response.status !== 302 || !location || new URL(location).protocol !== "https:")
+    if (
+      response.status !== 302 ||
+      !location ||
+      new URL(location).protocol !== "https:"
+    )
       throw Error("Artifact download unavailable");
     // The signed storage URL needs no GitHub credential.
-    const download = await fetch(location, { signal: AbortSignal.timeout(30_000) });
-    if (!download.ok || Number(download.headers.get("content-length")) > 30_000_000)
+    const download = await fetch(location, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (
+      !download.ok ||
+      Number(download.headers.get("content-length")) > 30_000_000
+    )
       throw Error("Artifact download rejected");
     const chunks: Buffer[] = [];
     let size = 0;

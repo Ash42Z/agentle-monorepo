@@ -75,11 +75,19 @@ test("request source migration preserves old jobs and accepts previous-release i
     s = new State(join(dir, "db"));
     assert.equal(s.next()?.source, null);
     assert.equal(s.conversation(1)?.thread, "thread");
-    s.db.prepare("INSERT INTO jobs(id,number,prompt) VALUES(?,?,?)").run("previous-release", 2, "request");
+    s.db
+      .prepare("INSERT INTO jobs(id,number,prompt) VALUES(?,?,?)")
+      .run("previous-release", 2, "request");
     s.enqueue("new", 1, "PR comment", 10);
-    assert.equal((s.db.prepare("SELECT source FROM jobs WHERE id='new'").get() as any).source, 10);
+    assert.equal(
+      (s.db.prepare("SELECT source FROM jobs WHERE id='new'").get() as any)
+        .source,
+      10,
+    );
     s.db.close();
-  } finally { rmSync(dir, { recursive: true }); }
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
 
 test("all PR associations survive workspace switches, restart and previous-release writes", () => {
@@ -94,10 +102,14 @@ test("all PR associations survive workspace switches, restart and previous-relea
     assert.equal(s.originNumber(20), 19);
     assert.equal(s.originNumber(22), 19);
     // Older releases continue to write their unchanged conversations schema.
-    s.db.prepare("INSERT INTO conversations VALUES(?,?,?,?)").run(23, "old-release", 24, "other-thread");
+    s.db
+      .prepare("INSERT INTO conversations VALUES(?,?,?,?)")
+      .run(23, "old-release", 24, "other-thread");
     assert.equal(s.originNumber(24), 23);
     s.saveConversation(19, "shared", 24, "thread");
     assert.equal(s.originNumber(24), 23);
     s.db.close();
-  } finally { rmSync(dir, { recursive: true }); }
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });

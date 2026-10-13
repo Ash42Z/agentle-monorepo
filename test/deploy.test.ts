@@ -77,7 +77,10 @@ test("deployment builds before drain and activates healthy exact release", () =>
     assert.ok(log.indexOf("docker build") < log.indexOf("/admin/drain"));
     assert.ok(log.indexOf("caddy validate") < log.indexOf("/admin/drain"));
     assert.ok(log.includes("exec -T caddy"));
-    assert.match(readFileSync(join(f.release, "release.env"), "utf8"), /AGENTLE_WEB_IMAGE=agentle-web:/);
+    assert.match(
+      readFileSync(join(f.release, "release.env"), "utf8"),
+      /AGENTLE_WEB_IMAGE=agentle-web:/,
+    );
     assert.equal(readlinkSync(join(f.host, "current")), f.release);
     assert.equal(readlinkSync(join(f.host, "previous")), f.old);
     assert.ok(log.includes("/admin/resume"));
@@ -149,5 +152,7 @@ test("failed preview readiness restores the prior release", () => {
     assert.ok(log.includes("exec -T previews"));
     assert.equal(log.split("up -d").length - 1, 2);
     assert.equal(readlinkSync(join(f.host, "current")), f.old);
-  } finally { rmSync(f.root, { recursive: true }); }
+  } finally {
+    rmSync(f.root, { recursive: true });
+  }
 });

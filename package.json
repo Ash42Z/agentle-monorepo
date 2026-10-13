@@ -6,7 +6,9 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "test": "tsx --test test/*.test.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,mjs}\" \"test/**/*.ts\" \"scripts/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,mjs}\" \"test/**/*.ts\" \"scripts/*.mjs\""
   },
   "dependencies": {
     "fflate": "0.8.3",
@@ -14,6 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "22.18.8",
+    "prettier": "3.6.2",
     "typescript": "5.9.3"
   },
   "engines": {

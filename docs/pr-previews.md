@@ -1,9 +1,8 @@
 # Automatic PR web previews
 
-Merging this implementation installs preview support through the existing main
-CI deployment. It uses the current server, domain, GitHub App and dashboard
-login. No additional DNS records, SSH commands or credentials are required,
-provided the App retains its existing Actions read permission.
+PR preview support is deployed through the normal main CI deployment. It
+uses the current server, domain, GitHub App and dashboard login. No additional
+DNS records, SSH commands or credentials are required, provided the App retains its existing Actions read permission.
 
 ## Architecture
 
@@ -42,7 +41,7 @@ CPU. No production database, workspace or subscription session is mounted into
 it. The dashboard receives the preview volume read-only.
 
 Deployment continues to build before draining, abort safely on drain timeout,
-and roll back on readiness failure. Readiness now also requires a recent
+and roll back on readiness failure. Readiness also requires a recent
 successful preview reconciliation for the exact release. Startup therefore
 checks that the App can list PRs; per-PR download failures are retried separately.
 No state migration is introduced and controller threads/workspaces are unchanged.
@@ -73,7 +72,7 @@ and Compose. Tests exercise invalid artifacts, failed CI, close/head races,
 link retry, fork rejection, authenticated serving, removal and deployment
 rollback when preview readiness fails.
 
-After merging, new or updated eligible PRs with successful artifact-producing CI
+New or updated eligible PRs with successful artifact-producing CI
 receive a link automatically. Older CI runs without the artifact cannot be
 previewed until CI is rerun or a new commit is pushed. Logs from the `previews`
 service report PR numbers for failed updates and retry without printing secrets.
