@@ -32,7 +32,7 @@
 <div class="sound-card"><div class="bars" aria-hidden="true">▂ ▅ ▃ █ ▆ ▂ ▇ ▄ ▆ ▃ ▅ ▂</div><button id="play">▶ Play clip</button><p id="duration"></p><div class="segment-timeline"><progress id="segment-progress" max="15" value="0" aria-label="Song segment playback"></progress><ol id="steps" aria-label="Song segment checkpoints"></ol><span id="segment-time">0.0s / 15s</span></div></div>
 <form id="guess-form"><label for="guess">Your guess</label><div class="input-row"><input id="guess" required list="songs" autocomplete="off" placeholder="Type or choose a song title"><button id="submit">Guess</button></div><datalist id="songs"></datalist></form>
 <button id="skip" class="secondary">Skip → hear more</button>
-<div id="answer" hidden><h2 id="answer-title"></h2><p id="answer-artist"></p><a id="deezer" target="_blank" rel="noopener noreferrer">Listen on Deezer ↗</a></div>
+<div id="answer" hidden><img id="answer-cover" hidden alt=""><div class="answer-details"><h2 id="answer-title"></h2><p id="answer-artist"></p><p id="answer-album"></p><a id="deezer" target="_blank" rel="noopener noreferrer">Listen on Deezer ↗</a></div></div>
 <button id="next" hidden>Next song →</button>
 </section>
 <p id="status" role="status" aria-live="polite"></p>
