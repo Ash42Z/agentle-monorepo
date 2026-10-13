@@ -84,12 +84,7 @@ async function poll() {
     if (c.user?.login === cfg.allowedUser) {
       const n = Number(c.issue_url.split("/").pop());
       const origin = state.originNumber(n);
-      state.enqueue(
-        `comment-${c.id}-${c.updated_at}`,
-        origin,
-        c.body,
-        n,
-      );
+      state.enqueue(`comment-${c.id}-${c.updated_at}`, origin, c.body, n);
     }
   }
   // Review comments and submitted reviews also carry user requests on existing PRs.
@@ -108,7 +103,12 @@ async function poll() {
         r.body &&
         r.submitted_at >= since
       )
-        state.enqueue(`review-${r.id}`, state.originNumber(pr.number), r.body, pr.number);
+        state.enqueue(
+          `review-${r.id}`,
+          state.originNumber(pr.number),
+          r.body,
+          pr.number,
+        );
   }
   state.set("pollSince", new Date(Date.parse(until) - 120_000).toISOString());
   lastPoll = until;
@@ -188,27 +188,48 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
     if (req.url === "/api/worker") {
-      res.end(JSON.stringify({
-        ...workerSnapshot(state, cfg.repository, activeJobId),
-        state: stopping ? "stopping" : draining ? "draining" : "running",
-        ready: ready && authReady, lastError, lastPoll,
-      }));
+      res.end(
+        JSON.stringify({
+          ...workerSnapshot(state, cfg.repository, activeJobId),
+          state: stopping ? "stopping" : draining ? "draining" : "running",
+          ready: ready && authReady,
+          lastError,
+          lastPoll,
+        }),
+      );
       return;
     }
     const match = /^\/api\/worker\/conversation\/([1-9][0-9]*)$/.exec(req.url);
-    const conversation = match ? state.conversation(Number(match[1])) : undefined;
+    const conversation = match
+      ? state.conversation(Number(match[1]))
+      : undefined;
     if (!conversation?.thread) {
-      res.writeHead(404).end(JSON.stringify({ error: "Conversation not available" }));
+      res
+        .writeHead(404)
+        .end(JSON.stringify({ error: "Conversation not available" }));
       return;
     }
     try {
       // Read only: fetching a transcript must never resume or start a turn.
       const c = codex;
       if (!c) throw Error("Codex unavailable");
-      const result = await c.rpc("thread/read", { threadId: conversation.thread, includeTurns: true });
-      res.end(JSON.stringify({ fetchedAt: new Date().toISOString(), messages: transcript(result.thread) }));
+      const result = await c.rpc("thread/read", {
+        threadId: conversation.thread,
+        includeTurns: true,
+      });
+      res.end(
+        JSON.stringify({
+          fetchedAt: new Date().toISOString(),
+          messages: transcript(result.thread),
+        }),
+      );
     } catch {
-      res.writeHead(503).end(JSON.stringify({ error: "Conversation temporarily unavailable; retry when Codex is connected." }));
+      res.writeHead(503).end(
+        JSON.stringify({
+          error:
+            "Conversation temporarily unavailable; retry when Codex is connected.",
+        }),
+      );
     }
     return;
   }

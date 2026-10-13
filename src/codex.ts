@@ -84,7 +84,11 @@ export class Codex extends EventEmitter {
     });
     this.child.stdin.write('{"method":"initialized"}\n');
   }
-  async run(threadId: string, prompt: string, onPlan?: (text: string) => Promise<void>) {
+  async run(
+    threadId: string,
+    prompt: string,
+    onPlan?: (text: string) => Promise<void>,
+  ) {
     return new Promise<string>(async (resolve, reject) => {
       let text = "";
       let planSent = false;
@@ -122,7 +126,7 @@ export class Codex extends EventEmitter {
         this.off("notification", handler);
         this.off("stopped", stopped);
         planDelivery.then(
-          () => error ? reject(error) : resolve(value),
+          () => (error ? reject(error) : resolve(value)),
           reject,
         );
       };
@@ -143,7 +147,10 @@ export class Codex extends EventEmitter {
     // EOF lets app-server flush its thread state and stop MCP children normally.
     await new Promise<void>((resolve, reject) => {
       const force = setTimeout(() => this.child.kill("SIGKILL"), 5000);
-      const timeout = setTimeout(() => finish(Error("Codex shutdown timed out")), 10_000);
+      const timeout = setTimeout(
+        () => finish(Error("Codex shutdown timed out")),
+        10_000,
+      );
       const finish = (error?: Error) => {
         clearTimeout(force);
         clearTimeout(timeout);

@@ -16,10 +16,15 @@ Requires Node 22.13 or newer and Docker.
 
 ```sh
 npm ci
+npm run format:check
 npm run check
 npm test
 docker build -t agentle:local .
 ```
+
+Use `npm run format` to format controller sources, tests and JavaScript build
+scripts. See [the development map](docs/development.md) for module boundaries,
+targeted checks and change constraints.
 
 ## Host setup
 

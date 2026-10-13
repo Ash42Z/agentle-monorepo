@@ -23,14 +23,19 @@ export class State {
   CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,number INTEGER NOT NULL,prompt TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'queued',thread TEXT,branch TEXT,pr INTEGER,result TEXT,due INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS conversations(number INTEGER PRIMARY KEY,branch TEXT NOT NULL,pr INTEGER,thread TEXT);
   PRAGMA user_version=1;`);
-    if (!(this.db.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).some(c => c.name === "source"))
+    if (
+      !(
+        this.db.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]
+      ).some((c) => c.name === "source")
+    )
       this.db.exec("ALTER TABLE jobs ADD COLUMN source INTEGER");
     if (path !== ":memory:")
       for (const suffix of ["-wal", "-shm"])
         try {
           chmodSync(path + suffix, 0o600);
         } catch {}
-    this.db.exec(`CREATE TABLE IF NOT EXISTS conversation_prs(pr INTEGER PRIMARY KEY,number INTEGER NOT NULL);
+    this.db
+      .exec(`CREATE TABLE IF NOT EXISTS conversation_prs(pr INTEGER PRIMARY KEY,number INTEGER NOT NULL);
       INSERT OR IGNORE INTO conversation_prs SELECT pr,number FROM conversations WHERE pr IS NOT NULL;
       INSERT OR IGNORE INTO conversation_prs SELECT pr,number FROM jobs WHERE pr IS NOT NULL;
       UPDATE jobs SET state='queued' WHERE state='running';`);
@@ -51,7 +56,9 @@ export class State {
   }
   enqueue(id: string, number: number, prompt: string, source = number) {
     this.db
-      .prepare("INSERT OR IGNORE INTO jobs(id,number,prompt,source) VALUES(?,?,?,?)")
+      .prepare(
+        "INSERT OR IGNORE INTO jobs(id,number,prompt,source) VALUES(?,?,?,?)",
+      )
       .run(id, number, prompt, source);
   }
   next(now = Date.now()) {
@@ -85,10 +92,17 @@ export class State {
       .run(...keys.map((k) => (fields as any)[k]), id);
   }
   originNumber(number: number) {
-    return (this.db.prepare(`SELECT number FROM conversation_prs WHERE pr=?
+    return (
+      (
+        this.db
+          .prepare(
+            `SELECT number FROM conversation_prs WHERE pr=?
       UNION ALL SELECT number FROM conversations WHERE pr=?
-      UNION ALL SELECT number FROM jobs WHERE pr=? LIMIT 1`).get(number, number, number) as
-      { number: number } | undefined)?.number ?? number;
+      UNION ALL SELECT number FROM jobs WHERE pr=? LIMIT 1`,
+          )
+          .get(number, number, number) as { number: number } | undefined
+      )?.number ?? number
+    );
   }
   conversation(number: number) {
     return this.db
@@ -107,9 +121,13 @@ export class State {
     const previous = this.conversation(number)?.pr;
     for (const associated of [previous, pr])
       if (associated != null)
-        this.db.prepare(`INSERT OR IGNORE INTO conversation_prs(pr,number) VALUES(?,
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO conversation_prs(pr,number) VALUES(?,
           COALESCE((SELECT number FROM conversations WHERE pr=? LIMIT 1),
-            (SELECT number FROM jobs WHERE pr=? LIMIT 1),?))`).run(associated, associated, associated, number);
+            (SELECT number FROM jobs WHERE pr=? LIMIT 1),?))`,
+          )
+          .run(associated, associated, associated, number);
     this.db
       .prepare(
         "INSERT INTO conversations VALUES(?,?,?,?) ON CONFLICT(number) DO UPDATE SET branch=excluded.branch,pr=excluded.pr,thread=excluded.thread",

@@ -7,12 +7,18 @@ import { serveTools } from "./agent-tools.js";
 type ExecutionContext = {
   gh: Pick<GitHub, "api" | "comment">;
   state: State;
-  work: Pick<Workspaces, "prepare" | "refresh" | "path" | "changed" | "publish" | "continueFromBase">;
+  work: Pick<
+    Workspaces,
+    "prepare" | "refresh" | "path" | "changed" | "publish" | "continueFromBase"
+  >;
   connect: (fresh?: boolean) => Promise<Pick<Codex, "rpc" | "run">>;
   cfg: { repository: string; allowedUser: string };
 };
 
-export async function execute(job: Job, { gh, state, work, connect, cfg }: ExecutionContext) {
+export async function execute(
+  job: Job,
+  { gh, state, work, connect, cfg }: ExecutionContext,
+) {
   const issue = await gh.api(`/issues/${job.number}`);
   if (issue.state !== "open" && job.id.startsWith("issue-")) {
     state.update(job.id, { state: "done" });
@@ -41,32 +47,60 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
   if (job.state !== "publishing" && job.result !== null) {
     // Retry final delivery without rerunning a turn that has already completed.
     if (!state.get(`${job.id}-agent-commented`))
-      await gh.comment(job.source ?? job.number, job.id, job.result || "Work completed.");
+      await gh.comment(
+        job.source ?? job.number,
+        job.id,
+        job.result || "Work completed.",
+      );
     state.update(job.id, { state: "done" });
     return;
   }
   if (conversation.pr && job.state !== "publishing" && !job.thread) {
     const pr = await gh.api(`/pulls/${conversation.pr}`);
-    if (pr.state === "open") await work.refresh(job.number, conversation.branch);
+    if (pr.state === "open")
+      await work.refresh(job.number, conversation.branch);
   }
   const publish = async (title?: string, body?: string) => {
-    if (!(await work.changed(job.number, base))) return { pr: conversation!.pr, changed: false };
+    if (!(await work.changed(job.number, base)))
+      return { pr: conversation!.pr, changed: false };
     if (conversation!.pr) {
       const pr = await gh.api(`/pulls/${conversation!.pr}`);
-      if (pr.state !== "open") throw Error("Select a new workspace before publishing to a closed PR");
+      if (pr.state !== "open")
+        throw Error("Select a new workspace before publishing to a closed PR");
     }
     if (!conversation!.pr && (!title || !body))
       throw Error("Supply title and body when creating a new PR");
-    await work.publish(job.number, conversation!.branch, base, job.id, Boolean(conversation!.pr));
+    await work.publish(
+      job.number,
+      conversation!.branch,
+      base,
+      job.id,
+      Boolean(conversation!.pr),
+    );
     let pr = conversation!.pr;
     if (!pr) {
-      const found = await gh.api(`/pulls?state=open&head=${cfg.repository.split("/")[0]}:${conversation!.branch}`);
-      pr = found[0]?.number ?? (await gh.api("/pulls", "POST", {
-        title: title!.slice(0, 240), body, head: conversation!.branch, base, draft: true,
-      })).number;
+      const found = await gh.api(
+        `/pulls?state=open&head=${cfg.repository.split("/")[0]}:${conversation!.branch}`,
+      );
+      pr =
+        found[0]?.number ??
+        (
+          await gh.api("/pulls", "POST", {
+            title: title!.slice(0, 240),
+            body,
+            head: conversation!.branch,
+            base,
+            draft: true,
+          })
+        ).number;
     }
     conversation = { ...conversation!, pr };
-    state.saveConversation(job.number, conversation.branch, pr, job.thread ?? conversation.thread);
+    state.saveConversation(
+      job.number,
+      conversation.branch,
+      pr,
+      job.thread ?? conversation.thread,
+    );
     state.update(job.id, { pr, branch: conversation.branch });
     return { pr, changed: true };
   };
@@ -93,24 +127,34 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
     let thread = job.thread ?? conversation.thread;
     let commented = false;
     const bridge = await serveTools(async (name, args) => {
-      if (!args || typeof args !== "object") throw Error("Invalid tool arguments");
+      if (!args || typeof args !== "object")
+        throw Error("Invalid tool arguments");
       const text = (value: unknown) => {
-        if (typeof value !== "string" || !value.trim()) throw Error("Expected non-empty text");
+        if (typeof value !== "string" || !value.trim())
+          throw Error("Expected non-empty text");
         return value;
       };
       const number = (value: unknown) => {
-        if (!Number.isSafeInteger(value) || (value as number) < 1) throw Error("Invalid issue or PR number");
+        if (!Number.isSafeInteger(value) || (value as number) < 1)
+          throw Error("Invalid issue or PR number");
         return value as number;
       };
       if (name === "github_read") {
         const path = text(args.path);
         // Keep reads repository-scoped; reject URL/path traversal and credential endpoints.
-        if (!/^\/(issues|pulls|commits|compare|actions|check-runs|branches)([/?]|$)/.test(path) || /[\\#%]|\.\./.test(path))
+        if (
+          !/^\/(issues|pulls|commits|compare|actions|check-runs|branches)([/?]|$)/.test(
+            path,
+          ) ||
+          /[\\#%]|\.\./.test(path)
+        )
           throw Error("Use a repository-relative GitHub state path");
         return gh.api(path);
       }
       if (name === "github_comment") {
-        const target = number(args.number), key = text(args.key), body = text(args.body);
+        const target = number(args.number),
+          key = text(args.key),
+          body = text(args.body);
         await gh.comment(target, `${job.id}-agent-${key}`, body);
         commented = true;
         state.set(`${job.id}-agent-commented`, "true");
@@ -118,15 +162,22 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
       }
       if (name === "github_workspace") {
         const key = text(args.key);
-        let pr: number | null = null, branch: string;
-        if (args.pr === null) branch = `agentle/${job.number}-${job.id.replace(/[^A-Za-z0-9_-]/g, "-")}-${key.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+        let pr: number | null = null,
+          branch: string;
+        if (args.pr === null)
+          branch = `agentle/${job.number}-${job.id.replace(/[^A-Za-z0-9_-]/g, "-")}-${key.replace(/[^A-Za-z0-9_-]/g, "-")}`;
         else {
           pr = number(args.pr);
           const target = await gh.api(`/pulls/${pr}`);
-          if (target.state !== "open" || target.head.repo?.full_name !== cfg.repository) throw Error("Choose an open same-repository PR");
+          if (
+            target.state !== "open" ||
+            target.head.repo?.full_name !== cfg.repository
+          )
+            throw Error("Choose an open same-repository PR");
           branch = target.head.ref;
         }
-        if (branch === base || branch === "main" || branch.startsWith("-")) throw Error("Unsafe workspace branch");
+        if (branch === base || branch === "main" || branch.startsWith("-"))
+          throw Error("Unsafe workspace branch");
         if (branch !== conversation!.branch) {
           // Fetch and check out the selected remote head without merging unrelated base work.
           await work.continueFromBase(job.number, branch, pr ? branch : base);
@@ -136,7 +187,11 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
         state.update(job.id, { branch, pr });
         return { branch, pr, workspace: dir };
       }
-      if (name === "github_publish") return publish(args.title === undefined ? undefined : text(args.title), args.body === undefined ? undefined : text(args.body));
+      if (name === "github_publish")
+        return publish(
+          args.title === undefined ? undefined : text(args.title),
+          args.body === undefined ? undefined : text(args.body),
+        );
       throw Error("Unknown GitHub tool");
     });
     try {
@@ -162,12 +217,18 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
       // in model-visible history instead of relying on config overrides alone.
       await c.rpc("thread/inject_items", {
         threadId: thread,
-        items: [{
-          type: "message", role: "developer",
-          content: [{ type: "input_text", text:
-            "Current Agentle publication policy supersedes older publication instructions in this saved conversation. You are authorized to invoke the agentle_github github_publish tool for the user's requested work. This tool is the controller: it commits and pushes your workspace and creates or updates the PR synchronously. Publication through this tool satisfies the requirement to publish only through the controller. Do not wait for automatic publication after your turn, ask the user for separate publication permission, or treat a local git commit/index permission error as a blocker to this tool. The agent chooses whether to update an existing open PR or create a new draft PR. Direct git add, commit, and push are reserved for the controller; keep using local files and read-only git commands for implementation and inspection. Never merge, push to the default branch, access controller credentials, or spawn subagents. Finish requested implementation by using github_publish and verifying its returned PR, or report the actual tool error. Discussion-only requests do not require publication.",
-          }],
-        }],
+        items: [
+          {
+            type: "message",
+            role: "developer",
+            content: [
+              {
+                type: "input_text",
+                text: "Current Agentle publication policy supersedes older publication instructions in this saved conversation. You are authorized to invoke the agentle_github github_publish tool for the user's requested work. This tool is the controller: it commits and pushes your workspace and creates or updates the PR synchronously. Publication through this tool satisfies the requirement to publish only through the controller. Do not wait for automatic publication after your turn, ask the user for separate publication permission, or treat a local git commit/index permission error as a blocker to this tool. The agent chooses whether to update an existing open PR or create a new draft PR. Direct git add, commit, and push are reserved for the controller; keep using local files and read-only git commands for implementation and inspection. Never merge, push to the default branch, access controller credentials, or spawn subagents. Finish requested implementation by using github_publish and verifying its returned PR, or report the actual tool error. Discussion-only requests do not require publication.",
+              },
+            ],
+          },
+        ],
       });
       const result = await c.run(
         thread!,
@@ -175,9 +236,15 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
       );
       state.update(job.id, { result });
       if (!commented && !state.get(`${job.id}-agent-commented`))
-        await gh.comment(job.source ?? job.number, job.id, result || "Work completed.");
+        await gh.comment(
+          job.source ?? job.number,
+          job.id,
+          result || "Work completed.",
+        );
       state.update(job.id, { state: "done" });
-    } finally { await bridge.close(); }
+    } finally {
+      await bridge.close();
+    }
     return;
   }
   // Complete publication already queued by the previous release without rerunning the agent.
@@ -191,7 +258,13 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
     state.update(job.id, { state: "done" });
     return;
   }
-  await work.publish(job.number, conversation.branch, base, job.id, Boolean(conversation.pr));
+  await work.publish(
+    job.number,
+    conversation.branch,
+    base,
+    job.id,
+    Boolean(conversation.pr),
+  );
   let pr = conversation.pr;
   if (!issue.pull_request) {
     const found = await gh.api(
@@ -218,7 +291,11 @@ export async function execute(job: Job, { gh, state, work, connect, cfg }: Execu
     job.thread ?? conversation.thread,
   );
   state.update(job.id, { pr });
-  await gh.comment(job.source ?? job.number, job.id, job.result ?? "Work completed.");
+  await gh.comment(
+    job.source ?? job.number,
+    job.id,
+    job.result ?? "Work completed.",
+  );
   if (state.get(job.id + "-new-pr") === String(pr))
     await gh.comment(
       job.number,
