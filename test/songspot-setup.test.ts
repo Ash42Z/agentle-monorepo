@@ -10,6 +10,11 @@ const presets = await import(
   pathToFileURL(`${process.cwd()}/web/songspot/presets.mjs`).href
 );
 class Element {
+  src = "";
+  alt = "";
+  removeAttribute(name: string) {
+    if (name === "src") this.src = "";
+  }
   style = { left: "" };
   className = "";
   children: Element[] = [];
@@ -34,7 +39,13 @@ class Element {
 }
 const artist = { id: 412, name: "Queen" };
 const releases = [
-  { id: 10, title: "Queen II", record_type: "album" },
+  {
+    id: 10,
+    title: "Queen II",
+    record_type: "album",
+    release_date: "1974-03-08",
+    cover_medium: "https://example.com/queen-ii.jpg",
+  },
   { id: 20, title: "Queen II (Deluxe Edition)", record_type: "album" },
   { id: 30, title: "An EP", record_type: "ep" },
 ];
@@ -281,4 +292,49 @@ test("timeline follows playback and skip extends it without restarting; replay a
   app.element("next").onclick!();
   assert.equal(app.element("segment-progress").value, 0);
   assert.equal(app.element("segment-time").textContent, "0.0s / 15s");
+});
+
+test("reveal shows the selected album cover and year only after the round ends", async () => {
+  const app = setup({
+    getItem: () =>
+      JSON.stringify({ version: 1, artists: { "412": [10] }, playlists: [] }),
+    setItem() {},
+  });
+  await choose(app);
+  await app.element("start").onclick!();
+  assert.equal(app.element("answer").hidden, true);
+  assert.equal(app.element("answer-cover").src, "");
+  assert.equal(app.element("answer-album").textContent, "");
+  for (let i = 0; i < 4; i++) app.element("skip").onclick!();
+  assert.equal(app.element("answer").hidden, false);
+  assert.equal(app.element("answer-album").textContent, "Queen II · 1974");
+  assert.equal(
+    app.element("answer-cover").src,
+    "https://example.com/queen-ii.jpg",
+  );
+  assert.equal(app.element("answer-cover").alt, "Cover of Queen II");
+  assert.equal(app.element("answer-cover").hidden, false);
+  app.element("next").onclick!();
+  assert.equal(app.element("answer").hidden, true);
+  assert.equal(app.element("answer-cover").src, "");
+  assert.equal(app.element("answer-album").textContent, "");
+  app.element("guess").value = app.element("songs").children[0].value;
+  app.element("guess-form").onsubmit!(submit);
+  assert.equal(app.element("answer-album").textContent, "Queen II · 1974");
+});
+
+test("reveal handles absent dates and covers without preventing play", async () => {
+  const app = setup({
+    getItem: () =>
+      JSON.stringify({ version: 1, artists: { "412": [30] }, playlists: [] }),
+    setItem() {},
+  });
+  await choose(app);
+  await app.element("start").onclick!();
+  app.element("guess").value = app.element("songs").children[0].value;
+  app.element("guess-form").onsubmit!(submit);
+  assert.equal(app.element("answer").hidden, false);
+  assert.equal(app.element("answer-album").textContent, "An EP · Unknown year");
+  assert.equal(app.element("answer-cover").hidden, true);
+  assert.equal(app.element("answer-cover").src, "");
 });

@@ -128,11 +128,12 @@ $('start').onclick = async () => {
   try {
     const results = [];
     // Snapshot choices and load sequentially to avoid flooding Deezer.
-    const choices = artists.map(artist => ({ artist, ids: [...albumStates.get(artist.id).ids] }));
-    for (const { artist, ids } of choices) {
-      for (const id of ids) {
+    const choices = artists.map(artist => ({ artist, albums: albumStates.get(artist.id).albums.filter(album => albumStates.get(artist.id).ids.has(album.id)) }));
+    for (const { artist, albums } of choices) {
+      for (const album of albums) {
+        const id = album.id;
         if (!cache.has(id)) cache.set(id, await catalog(api, `albums/${id}/tracks`));
-        results.push(cache.get(id).filter(track => track.artist?.id === artist.id));
+        results.push(cache.get(id).filter(track => track.artist?.id === artist.id).map(track => ({ ...track, album })));
       }
     }
     tracks = playableTracks(results.flat());
@@ -175,7 +176,15 @@ function render() {
   $('next').hidden = $('answer').hidden = !round.done;
   $('skip').textContent = round.step === 3 ? 'Reveal song' : 'Skip → hear more';
   $('guess').value = '';
+  $('answer-album').textContent = '';
+  $('answer-cover').hidden = true; $('answer-cover').removeAttribute('src'); $('answer-cover').alt = '';
   if (round.done) {
+    const album = round.track.album;
+    const year = typeof album?.release_date === 'string' ? album.release_date.match(/^\d{4}(?=-|$)/)?.[0] : undefined;
+    $('answer-album').textContent = `${album?.title || 'Unknown album'} · ${year || 'Unknown year'}`;
+    if (/^https:\/\//.test(album?.cover_medium || '')) {
+      $('answer-cover').src = album.cover_medium; $('answer-cover').alt = `Cover of ${album.title || 'the album'}`; $('answer-cover').hidden = false;
+    }
     $('answer-title').textContent = round.track.title; $('answer-artist').textContent = round.track.artist.name;
     $('deezer').href = `https://www.deezer.com/track/${Number(round.track.id)}`;
   }
