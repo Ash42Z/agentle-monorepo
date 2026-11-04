@@ -6,7 +6,7 @@
 agentle.cc {
 	# OpenCloud runs independently and joins this stack’s Docker network.
 	redir /cloud /cloud/ 308
-	@opencloud path /cloud/* /dav/*
+	@opencloud path /cloud/* /dav/* /themes/*
 	handle @opencloud {
 		reverse_proxy opencloud-gateway:8080
 	}
