@@ -4,6 +4,13 @@
 
 # Add future service routes inside this block, before the fallback handle.
 agentle.cc {
+	# OpenCloud runs independently and joins this stack’s Docker network.
+	redir /cloud /cloud/ 308
+	@opencloud path /cloud/* /dav/* /themes/*
+	handle @opencloud {
+		reverse_proxy opencloud-gateway:8080
+	}
+
 	encode zstd gzip
 	# Preview Songspot uses the same fixed public catalog routes as production.
 	@previewMusic path_regexp previewMusic ^/previews/pr-[1-9][0-9]*/songspot/api/(.*)$
