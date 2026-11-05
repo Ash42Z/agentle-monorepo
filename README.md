@@ -110,3 +110,9 @@ Existing PR publication commits saved local edits before reconciling the current
 ## OpenCloud
 
 `https://agentle.cc/cloud/` is proxied to the separately managed OpenCloud gateway. The standalone Compose project lives at `/opt/opencloud` on the VPS; its gateway joins the external `agentle-bot_default` Docker network with alias `opencloud-gateway`. OpenCloud configuration, S3 credentials and metadata stay outside this repository. The `/dav/*` and `/themes/*` namespaces are also forwarded because the file-transfer client and login branding expect those paths at the domain root. The gateway handles subpath response rewriting; validate login, upload and download after OpenCloud upgrades.
+
+## Mailgun inbox
+
+Mailgun forwards parsed inbound emails to `POST https://agentle.cc/mailgun/receive`. Caddy routes `/mailgun/*` to the separately managed `mailgun-inbox` service on `agentle-bot_default`. The standalone project is `/opt/mailgun` on the VPS. It verifies Mailgun HTTP webhook HMAC signatures before accepting messages and deduplicates repeated delivery tokens.
+
+The inbox at `https://agentle.cc/mailgun/` requires its own login, saved in the protected `/opt/mailgun/admin-login.txt`. Bodies, headers, and attachments persist locally in `/opt/mailgun/data/inbox.sqlite`; this service does not use OpenCloud or its S3 bucket. Email HTML is shown as source rather than executed. Signing keys and login credentials stay outside Git.
