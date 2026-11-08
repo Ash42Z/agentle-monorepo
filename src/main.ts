@@ -148,7 +148,9 @@ async function tick() {
     if (kind === "quota")
       try {
         limits = await codex?.rpc("account/rateLimits/read");
-      } catch {}
+      } catch {
+        // Optional quota metadata: quotaDelay falls back to bounded backoff.
+      }
     const current = state.db
       .prepare("SELECT state FROM jobs WHERE id=?")
       .get(job.id) as { state: string };
@@ -168,7 +170,9 @@ async function tick() {
         job.id + "-" + kind,
         lastError + ". Existing work is preserved.",
       );
-    } catch {}
+    } catch {
+      // Best-effort notification: the persisted waiting job remains retryable.
+    }
   } finally {
     activeJobs = 0;
     activeJobId = null;
@@ -244,16 +248,17 @@ const server = createServer(async (req, res) => {
     res.writeHead(404).end();
     return;
   }
-  const healthy = ready && authReady;
+  // Worker authentication is reported separately and must not block deployment
+  // of the controller or independent web services.
   res
-    .writeHead(req.url === "/ready" && !healthy ? 503 : 200, {
+    .writeHead(req.url === "/ready" && !ready ? 503 : 200, {
       "Content-Type": "application/json",
     })
     .end(
       JSON.stringify({
         state: draining ? "draining" : "running",
         activeJobs,
-        ready: healthy,
+        ready,
         authReady,
         lastPoll,
         lastError,
@@ -267,11 +272,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const)
     stopping = true;
     draining = true;
   });
-try {
-  await connect();
-} catch {
-  lastError = "Codex sign-in required";
-}
+// tick polls GitHub before attempting Codex authentication, so /ready can
+// succeed even when the optional worker backend is signed out or unavailable.
 while (!stopping) {
   await tick();
   await new Promise((r) =>
