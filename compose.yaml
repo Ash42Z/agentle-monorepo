@@ -50,6 +50,21 @@ services:
       - /root/.config/agentle/config.json:/config/config.json:ro
       - /root/.config/agentle/github-app.pem:/config/github-app.pem:ro
       - previews:/previews
+  remote-pi-relay:
+    image: jacobmoura7/remote-pi-relay:v0.3.1@sha256:7255159041fe32b02a30ba2e09a671fa00783f24c217750cbdf74c5f8b77a7b6
+    restart: unless-stopped
+    init: true
+    environment:
+      REMOTEPI_RELAY_PORT: "3000"
+      REMOTEPI_MESH_DB_PATH: /data/mesh.db
+    volumes:
+      - remote_pi_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "5", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
   caddy:
     image: ${AGENTLE_WEB_IMAGE:?Set AGENTLE_WEB_IMAGE}
     restart: unless-stopped
@@ -68,6 +83,7 @@ services:
       timeout: 5s
       retries: 3
 volumes:
+  remote_pi_data:
   previews:
   caddy_data:
   caddy_config:

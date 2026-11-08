@@ -13,6 +13,8 @@ docker build -t "$image" "$release_dir"
 web_image="agentle-web:$release_sha"
 docker build -t "$web_image" -f "$release_dir/web/Dockerfile" "$release_dir"
 docker run --rm -e AGENTLE_RELEASE="$release_sha" "$web_image" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+AGENTLE_IMAGE="$image" AGENTLE_WEB_IMAGE="$web_image" AGENTLE_RELEASE="$release_sha" \
+ docker compose --project-name agentle-bot -f "$release_dir/compose.yaml" pull remote-pi-relay
 admin_token=$(cat "${AGENTLE_ADMIN_TOKEN_FILE:-/root/.config/agentle/admin-token}")
 admin_request() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $admin_token" "${@:2}" "http://127.0.0.1:8080/$1"; }
 old_dir=$(readlink -f "$deploy_root/current" 2>/dev/null || true)
@@ -53,7 +55,8 @@ healthy=false
 for attempt in $(seq 1 "${AGENTLE_READY_ATTEMPTS:-60}"); do
  if admin_request ready | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(not d["ready"] or d["release"]!=sys.argv[1])' "$release_sha"; then
   if [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T caddy wget -q -O - http://127.0.0.1:8081/health) == "$release_sha" ]] &&
-     [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T previews node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/preview-ready.json"));if(Date.now()-d.time>120000)process.exit(1);console.log(d.release)') == "$release_sha" ]]; then healthy=true;break;fi
+     [[ $(docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T previews node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/preview-ready.json"));if(Date.now()-d.time>120000)process.exit(1);console.log(d.release)') == "$release_sha" ]] &&
+     docker compose --project-name agentle-bot --env-file "$release_dir/release.env" -f "$release_dir/compose.yaml" exec -T remote-pi-relay curl --fail --silent --max-time 5 http://127.0.0.1:3000/health >/dev/null; then healthy=true;break;fi
  fi
  sleep 2
 done

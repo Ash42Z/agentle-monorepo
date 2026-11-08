@@ -35,7 +35,7 @@ function fixture(mode: string) {
   script("git", `echo ${sha}`);
   script(
     "docker",
-    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\nif [[ "$*" == *"exec -T previews"* ]]; then echo ${mode === "preview-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"exec -T caddy"* ]]; then echo ${mode === "web-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"caddy validate"* && "${mode}" == "invalid-web" ]]; then exit 1;fi\n`,
+    `echo "docker $*" >> "$TEST_LOG"\nif [[ "$*" == *"ps --status"* ]]; then echo container;fi\nif [[ "$*" == *"exec -T previews"* ]]; then echo ${mode === "preview-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"exec -T caddy"* ]]; then echo ${mode === "web-rollback" ? "wrong-release" : sha};fi\nif [[ "$*" == *"caddy validate"* && "${mode}" == "invalid-web" ]]; then exit 1;fi\nif [[ "$*" == *"pull remote-pi-relay"* && "${mode}" == "relay-pull-failure" ]]; then exit 1;fi\nif [[ "$*" == *"exec -T remote-pi-relay"* && "${mode}" == "relay-rollback" ]]; then exit 1;fi\n`,
   );
   script(
     "curl",
@@ -77,6 +77,10 @@ test("deployment builds before drain and activates healthy exact release", () =>
     assert.ok(log.indexOf("docker build") < log.indexOf("/admin/drain"));
     assert.ok(log.indexOf("caddy validate") < log.indexOf("/admin/drain"));
     assert.ok(log.includes("exec -T caddy"));
+    assert.ok(log.includes("exec -T remote-pi-relay"));
+    assert.ok(
+      log.indexOf("pull remote-pi-relay") < log.indexOf("/admin/drain"),
+    );
     assert.match(
       readFileSync(join(f.release, "release.env"), "utf8"),
       /AGENTLE_WEB_IMAGE=agentle-web:/,
@@ -134,6 +138,37 @@ test("failed web readiness rolls back and removes newly introduced services", ()
     const r = f.run();
     assert.notEqual(r.status, 0);
     const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.equal(log.split("up -d").length - 1, 2);
+    assert.ok(log.includes("--remove-orphans"));
+    assert.equal(readlinkSync(join(f.host, "current")), f.old);
+    assert.ok(log.includes("/admin/resume"));
+  } finally {
+    rmSync(f.root, { recursive: true });
+  }
+});
+
+test("failed relay image pull aborts before draining", () => {
+  const f = fixture("relay-pull-failure");
+  try {
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.ok(log.includes("pull remote-pi-relay"));
+    assert.ok(!log.includes("/admin/drain"));
+    assert.ok(!log.includes("up -d"));
+    assert.equal(readlinkSync(join(f.host, "current")), f.old);
+  } finally {
+    rmSync(f.root, { recursive: true });
+  }
+});
+
+test("failed relay readiness restores the prior release", () => {
+  const f = fixture("relay-rollback");
+  try {
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    const log = readFileSync(join(f.root, "log"), "utf8");
+    assert.ok(log.includes("exec -T remote-pi-relay"));
     assert.equal(log.split("up -d").length - 1, 2);
     assert.ok(log.includes("--remove-orphans"));
     assert.equal(readlinkSync(join(f.host, "current")), f.old);

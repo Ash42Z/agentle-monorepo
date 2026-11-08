@@ -41,7 +41,7 @@ Install `scripts/github_host.py` and `scripts/deploy-entry.sh` in root-owned `/o
 
 Repository Actions secrets: `AGENTLE_DEPLOY_KEY`, `AGENTLE_DEPLOY_HOST`, `AGENTLE_KNOWN_HOSTS` (pin the actual SSH host public key). The production environment uses these repository secrets. CI builds and tests the exact merge commit before deployment.
 
-Host releases live at `/opt/agentle-bot/releases/<SHA>`. Deployment acquires a lock, builds before draining, waits up to six hours for active work, backs up SQLite and recreates the Compose services. Both the controller and web images are built and the Caddyfile validated before draining. Deployment checks the controller and the Caddy release probe; rollback restores both images and removes services absent from the prior release. A new release starts drained until deployment verifies readiness and explicitly resumes it. Activation is persisted so ordinary restarts resume processing. Readiness checks GitHub polling and ChatGPT authentication. Failed startup restores the previous release; additive schema changes must remain compatible with that version. State lives outside releases. The previous release and database backups are retained. Docker starts at boot; Compose uses `restart: unless-stopped`.
+Host releases live at `/opt/agentle-bot/releases/<SHA>`. Deployment acquires a lock, builds before draining, waits up to six hours for active work, backs up SQLite and recreates the Compose services. Both the controller and web images are built, the Caddyfile validated, and the pinned Remote Pi relay image pulled before draining. Deployment checks the controller, the Caddy release probe and relay health; rollback restores both images and removes services absent from the prior release. A new release starts drained until deployment verifies readiness and explicitly resumes it. Activation is persisted so ordinary restarts resume processing. Readiness checks GitHub polling and ChatGPT authentication. Failed startup restores the previous release; additive schema changes must remain compatible with that version. State lives outside releases. The previous release and database backups are retained. Docker starts at boot; Compose uses `restart: unless-stopped`.
 
 The localhost admin API requires `Authorization: Bearer <admin-token>`: `POST /admin/drain`, `POST /admin/resume`, `GET /admin/status`, `GET /ready`. Port 8080 is published only to host loopback. SIGTERM stops collecting new jobs and waits for the current job to finish; an unclean restart preserves workspace state and resumes the durable job.
 
@@ -67,7 +67,10 @@ Local image/configuration checks:
 docker build -t agentle-web:local -f web/Dockerfile .
 docker run --rm -e AGENTLE_RELEASE=local agentle-web:local caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 AGENTLE_IMAGE=agentle:local AGENTLE_WEB_IMAGE=agentle-web:local AGENTLE_RELEASE=local docker compose config --quiet
+node scripts/test-relay.mjs agentle-web:local
 ```
+
+The relay smoke test pulls the pinned relay image and starts disposable containers on an isolated network with a loopback-only ephemeral HTTP port. It checks real Caddy routing, WebSocket challenges with and without the trailing slash, mesh GET/POST endpoints and relay restart health, then removes its containers, network and volumes. CI runs the same test.
 
 ## PR web previews
 
@@ -106,6 +109,16 @@ Each request records the issue or PR where it was posted separately from its wor
 The controller keeps GitHub credentials private and exposes a short-lived, authenticated loopback bridge for the current job only. Comments use stable per-message keys for retry deduplication. Workspace switches refuse uncommitted changes, closed PRs cannot receive publication, and default-branch publication and merging remain unavailable. Thread IDs and workspaces survive interruption and quota waits. Jobs already in the previous release’s publishing checkpoint still finish through its compatible publication path.
 
 Existing PR publication commits saved local edits before reconciling the current remote PR head and pushing without force. If reconciliation produces merge conflicts, publication pauses with the local commits and remote history preserved. The agent resolves the worktree files, runs checks, and retries `github_publish`; the controller commits the resolution. Git failures identify the failing operation and return safe diagnostic categories without exposing raw stderr or credentials.
+
+## Remote Pi relay
+
+Set the Remote Pi app's relay URL to **`https://agentle.cc/remote-pi-relay`** (the app converts HTTPS to WSS). Clients that expect an explicit WebSocket URL can use **`wss://agentle.cc/remote-pi-relay/`**. Both base URL forms work without a redirect, which avoids breaking WebSocket handshakes.
+
+Caddy terminates TLS and strips `/remote-pi-relay` before proxying to the Compose service `remote-pi-relay:3000`. This also exposes `GET /remote-pi-relay/health` and the relay's signed `GET`/`POST /remote-pi-relay/mesh/<owner_pk_hash>` endpoints; it does not claim a domain-root `/mesh` route or expose port 3000 on the host. WebSocket upgrades are handled by Caddy automatically. The relay is not a browser UI and uses its own Ed25519 challenge-response and signed membership protocol, not the dashboard login. Possessing a connection key is not an owner allowlist; this is an internet-accessible relay, not a private, account-gated endpoint.
+
+Compose pins the official `jacobmoura7/remote-pi-relay` v0.3.1 image by digest. The named volume `remote_pi_data` stores `/data/mesh.db` (signed membership metadata); it is not mounted into the controller and receives no GitHub, controller or Pi credentials. Back up this volume separately using SQLite's backup mechanism or while the relay is stopped. Do not remove it with `docker compose down -v`. Review upstream protocol compatibility and rerun the smoke test when updating the pinned image. Deployment pre-pulls it before draining and rolls back if relay health fails; rollback to an older release removes the new service but retains its data volume.
+
+Relay traffic is protected in transit by TLS, but operating the relay remains a trust boundary: do not assume all payloads are end-to-end encrypted. See the [upstream relay security model](https://github.com/jacobaraujo7/remote_pi/blob/main/relay/README.md).
 
 ## OpenCloud
 

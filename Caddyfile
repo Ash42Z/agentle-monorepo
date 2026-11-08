@@ -4,6 +4,14 @@
 
 # Add future service routes inside this block, before the fallback handle.
 agentle.cc {
+	# Remote Pi uses WebSockets at / and HTTP membership endpoints at /mesh/*.
+	# Accept both base URL forms without redirecting a WebSocket handshake.
+	@remotePiRelay path /remote-pi-relay /remote-pi-relay/*
+	handle @remotePiRelay {
+		uri strip_prefix /remote-pi-relay
+		reverse_proxy remote-pi-relay:3000
+	}
+
 	# Signed inbound mail and its authenticated diagnostic inbox.
 	redir /mailgun /mailgun/ 308
 	handle /mailgun/* {
