@@ -4,6 +4,12 @@
 
 # Add future service routes inside this block, before the fallback handle.
 agentle.cc {
+	# Signed inbound mail and its authenticated diagnostic inbox.
+	redir /mailgun /mailgun/ 308
+	handle /mailgun/* {
+		reverse_proxy mailgun-inbox:8080
+	}
+
 	# OpenCloud runs independently and joins this stack’s Docker network.
 	redir /cloud /cloud/ 308
 	@opencloud path /cloud/* /dav/* /themes/*
